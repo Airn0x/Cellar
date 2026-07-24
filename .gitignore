@@ -1,0 +1,15 @@
+# build outputs
+/engine/cellar
+/engine/dist/
+/app/build/
+/app/.gradle/
+*.apk
+*.aab
+
+# machine data never belongs in git
+rootfs/
+*.tar.zst
+
+# editor/os noise
+.DS_Store
+*.swp
