@@ -140,6 +140,11 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
                 busy = null
                 refresh()
             }
+            // A finished job shouldn't keep eating a phone screen. Fade
+            // the strip out on its own — unless the log is open, which
+            // means the user is reading it.
+            delay(6000)
+            if (busy == null && !showLog) stripVisible = false
         }
     }
 
@@ -194,7 +199,6 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
             when (tab) {
                 MACHINES -> MachinesTab(
                     machines = machines,
-                    busy = busy != null,
                     onCreate = { distro ->
                         val name = nextName(machines, distro)
                         work("creating $name") { engine.create(name, distro, ::logLine) }
@@ -219,7 +223,6 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
                 CATALOG -> CatalogTab(
                     stacks = stacks,
                     machines = machines,
-                    busy = busy != null,
                     onInstall = { stack, machine ->
                         work("installing ${stack.name} → $machine") {
                             showLog = true
@@ -254,7 +257,6 @@ private fun nextName(machines: List<Engine.Machine>, distro: String): String {
 @Composable
 private fun MachinesTab(
     machines: List<Engine.Machine>,
-    busy: Boolean,
     onCreate: (String) -> Unit,
     onStart: (Engine.Machine) -> Unit,
     onStop: (Engine.Machine) -> Unit,
@@ -264,9 +266,11 @@ private fun MachinesTab(
     var creating by remember { mutableStateOf(false) }
 
     Column {
+        // Controls stay put while work runs — hiding them made the app
+        // look broken. work() already refuses to start a second job.
         SectionTitle(if (creating) "PICK A DISTRO" else "MACHINES") {
             if (creating) Pill("cancel", Muted) { creating = false }
-            else if (!busy) Pill("+ new", Amber, filled = true) { creating = true }
+            else Pill("+ new", Amber, filled = true) { creating = true }
         }
         Spacer(Modifier.height(12.dp))
 
@@ -338,16 +342,14 @@ private fun MachinesTab(
                         )
                     }
                 }
-                if (!busy) {
-                    Spacer(Modifier.height(14.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (!m.broken) {
-                            if (m.running) Pill("stop", Amber) { onStop(m) }
-                            else Pill("start", Green, filled = true) { onStart(m) }
-                            Pill("logs", Muted) { onLogs(m) }
-                        }
-                        Pill("remove", Red) { onRemove(m) }
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!m.broken) {
+                        if (m.running) Pill("stop", Amber) { onStop(m) }
+                        else Pill("start", Green, filled = true) { onStart(m) }
+                        Pill("logs", Muted) { onLogs(m) }
                     }
+                    Pill("remove", Red) { onRemove(m) }
                 }
             }
         }
@@ -358,7 +360,6 @@ private fun MachinesTab(
 private fun CatalogTab(
     stacks: List<Engine.Stack>,
     machines: List<Engine.Machine>,
-    busy: Boolean,
     onInstall: (Engine.Stack, String) -> Unit,
 ) {
     var open by remember { mutableStateOf<String?>(null) }
@@ -382,7 +383,7 @@ private fun CatalogTab(
         }
 
         verified.forEach { s ->
-            StackCard(s, machines, open == s.name, busy, {
+            StackCard(s, machines, open == s.name, {
                 open = if (open == s.name) null else s.name
             }, onInstall)
         }
@@ -392,7 +393,7 @@ private fun CatalogTab(
             SectionTitle("NOT YET VERIFIED ON A PHONE")
             Spacer(Modifier.height(8.dp))
             unverified.forEach { s ->
-                StackCard(s, machines, open == s.name, busy, {
+                StackCard(s, machines, open == s.name, {
                     open = if (open == s.name) null else s.name
                 }, onInstall)
             }
@@ -405,7 +406,6 @@ private fun StackCard(
     s: Engine.Stack,
     machines: List<Engine.Machine>,
     expanded: Boolean,
-    busy: Boolean,
     onToggle: () -> Unit,
     onInstall: (Engine.Stack, String) -> Unit,
 ) {
@@ -439,7 +439,7 @@ private fun StackCard(
                 color = if (s.verified) Green else Amber, fontSize = 15.sp,
             )
         }
-        if (expanded && !busy) {
+        if (expanded) {
             Spacer(Modifier.height(14.dp))
             val usable = machines.filter { !it.broken && s.runsOn(it.distro) }
             if (usable.isEmpty()) {

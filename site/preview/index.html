@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cellar app preview</title>
+<meta name="description" content="A clickable web replica of the Cellar Android app — same layout, same flows, mock data.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+/* Mirrors android/app/src/main/java/app/cellar/Ui.kt — when this changes,
+   the Compose side changes with it. Mock data only; nothing runs here. */
+:root{
+  --bg:#07090d; --panel:#0e1219; --panel-hi:#141a24; --console:#05070a;
+  --line:#1b2230; --ink:#e9e5da; --muted:#96a0b0; --dim:#7b8698;
+  --amber:#ffb454; --green:#46d47e; --red:#ff6b6b;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--sans);
+  display:flex; justify-content:center; -webkit-font-smoothing:antialiased;
+}
+#phone{
+  width:100%; max-width:430px; height:100dvh; display:flex; flex-direction:column;
+  position:relative; overflow:hidden;
+}
+/* header */
+header{
+  display:flex; align-items:center; gap:8px;
+  padding:12px 18px; padding-top:max(12px, env(safe-area-inset-top));
+}
+header .brand{font-family:var(--mono); font-size:22px}
+header .status{font-family:var(--mono); font-size:9px; color:var(--amber)}
+header .status.ok{color:var(--green)}
+header .up{margin-left:auto; display:flex; align-items:center; gap:6px;
+  font-family:var(--mono); font-size:11px; color:var(--green)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+.dot.pulse{animation:pulse .9s ease-in-out infinite alternate}
+@keyframes pulse{from{opacity:.35}to{opacity:1}}
+/* content */
+main{flex:1; overflow-y:auto; padding:0 18px 24px; -webkit-overflow-scrolling:touch}
+.section{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.section h2{font-family:var(--mono); font-size:11px; letter-spacing:1.5px; color:var(--muted); font-weight:400}
+.section .right{margin-left:auto; display:flex; gap:8px}
+.card{
+  background:linear-gradient(180deg,var(--panel-hi),var(--panel));
+  border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:12px;
+}
+.card.accent-green{border-color:rgba(70,212,126,.35)}
+.card.accent-amber{border-color:rgba(255,180,84,.35)}
+.card.accent-red{border-color:rgba(255,107,107,.35)}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1;min-width:0}
+.name{font-size:17px;font-weight:600}
+.sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px}
+.note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px}
+.desc{font-size:12px;color:var(--muted);margin-top:2px}
+.actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.pill{
+  font-family:var(--mono); font-size:12px; padding:10px 14px; border-radius:10px;
+  border:1px solid currentColor; background:none; cursor:pointer; color:var(--muted);
+}
+.pill.amber{color:var(--amber)} .pill.green{color:var(--green)} .pill.red{color:var(--red)}
+.pill.filled{background:currentColor; border-color:currentColor}
+.pill.filled span{color:var(--bg); font-weight:600}
+.chip{
+  font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:8px;
+  background:var(--panel);border:1px solid var(--line);color:var(--muted);cursor:pointer;
+}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.output{
+  background:var(--console); border:1px solid var(--line); border-radius:16px; padding:14px;
+  font-family:var(--mono); font-size:11px; line-height:16px; color:var(--muted);
+  white-space:pre-wrap; word-break:break-word; min-height:180px; max-height:46dvh; overflow:auto;
+}
+.output .cmd{color:var(--green)}
+.output.empty{color:var(--dim)}
+input[type=text],input[type=password]{
+  width:100%; background:var(--console); border:1px solid var(--line); border-radius:12px;
+  padding:13px 14px; color:var(--ink); font-family:var(--mono); font-size:13px;
+}
+input::placeholder{color:var(--dim)}
+label.tiny{font-family:var(--mono);font-size:10px;color:var(--dim);display:block;margin-bottom:8px}
+.hint{font-size:11px;color:var(--dim);line-height:16px}
+/* bottom nav */
+nav{
+  display:flex; gap:2px; padding:8px 6px;
+  padding-bottom:max(8px, env(safe-area-inset-bottom));
+  background:var(--panel); border-top:1px solid var(--line);
+  border-radius:18px 18px 0 0;
+}
+nav button{
+  flex:1; background:none; border:0; cursor:pointer; color:var(--dim);
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:8px 0; border-radius:12px; font-family:var(--mono); font-size:9px;
+}
+nav button .glyph{font-size:17px; line-height:1}
+nav button[aria-current=page]{color:var(--amber)}
+nav button[aria-current=page] .glyph{color:var(--amber)}
+.hidden{display:none !important}
+.banner{
+  background:rgba(255,180,84,.10); border:1px solid rgba(255,180,84,.35);
+  border-radius:12px; padding:10px 12px; font-size:11px; color:var(--amber);
+  margin-bottom:14px; line-height:16px;
+}
+</style>
+</head>
+<body>
+<div id="phone">
+
+  <header>
+    <div>
+      <div class="brand">cellar</div>
+      <div class="status ok" id="status">cellar 0.5.0 · engine + proot ready</div>
+    </div>
+    <div class="up hidden" id="upcount"><i class="dot pulse"></i><span id="upn">0 up</span></div>
+  </header>
+
+  <main id="main">
+    <div class="banner">
+      Web preview of the Android app — same layout and flows, mock data. Nothing
+      here creates a real machine.
+    </div>
+
+    <!-- activity strip -->
+    <div class="card accent-amber hidden" id="strip">
+      <div class="row">
+        <i class="dot pulse" id="stripdot" style="color:var(--amber)"></i>
+        <div class="grow">
+          <div style="font-family:var(--mono);font-size:13px" id="striplabel">working</div>
+          <div class="note" id="striplast"></div>
+        </div>
+        <button class="pill" id="striptoggle">log</button>
+        <button class="pill hidden" id="stripclose">✕</button>
+      </div>
+      <div class="output hidden" id="striplog" style="margin-top:12px;min-height:0"></div>
+    </div>
+
+    <section id="tab-machines"></section>
+    <section id="tab-catalog" class="hidden"></section>
+    <section id="tab-chat" class="hidden"></section>
+    <section id="tab-console" class="hidden"></section>
+    <section id="tab-setup" class="hidden"></section>
+  </main>
+
+  <nav id="nav">
+    <button data-tab="machines" aria-current="page"><span class="glyph">▤</span>machines</button>
+    <button data-tab="catalog"><span class="glyph">◈</span>catalog</button>
+    <button data-tab="chat"><span class="glyph">✦</span>chat</button>
+    <button data-tab="console"><span class="glyph">❯</span>console</button>
+    <button data-tab="setup"><span class="glyph">⚙</span>setup</button>
+  </nav>
+</div>
+
+<script>
+// ---------- mock state (mirrors what `cellar ls/catalog --json` returns) ----------
+const state = {
+  tab: 'machines',
+  creating: false,
+  busy: null,
+  log: [],
+  machines: [
+    {name:'dev', distro:'debian', release:'trixie', running:true, pid:31979, broken:false},
+    {name:'alpine', distro:'alpine', release:'3.24', running:false, pid:0, broken:false},
+  ],
+  stacks: [
+    {name:'claude-code', description:"Claude Code — Anthropic's agentic coding CLI", category:'agent', size:'~250 MB (node + npm)', verified:true, needs_key:'ANTHROPIC_API_KEY', chat:'claude -p', distros:['debian','ubuntu']},
+    {name:'opencode', description:'OpenCode — open-source terminal coding agent', category:'agent', size:'~180 MB (node)', verified:true, needs_key:'ANTHROPIC_API_KEY', chat:'opencode run', distros:['debian','ubuntu']},
+    {name:'aider', description:'Aider — AI pair programming in your git repo', category:'agent', size:'~200 MB (python + deps)', verified:true, needs_key:'ANTHROPIC_API_KEY', chat:'aider --no-git --yes --message', distros:[]},
+    {name:'goose', description:"Goose — Block's extensible on-machine AI agent", category:'agent', size:'~80 MB', verified:true, needs_key:'ANTHROPIC_API_KEY', chat:'goose run -t', distros:['debian','ubuntu']},
+    {name:'code-server', description:'VS Code in the browser, on port 8080', category:'service', size:'~350 MB', verified:true, needs_key:'', chat:'', distros:['debian','ubuntu']},
+    {name:'python-uv', description:'Python 3 + uv package manager', category:'runtime', size:'~120 MB', verified:true, needs_key:'', chat:'', distros:[]},
+    {name:'node', description:'Node.js + npm', category:'runtime', size:'~200 MB', verified:true, needs_key:'', chat:'', distros:[]},
+    {name:'sshd', description:'OpenSSH server on port 2222', category:'service', size:'~15 MB', verified:true, needs_key:'', chat:'', distros:[]},
+    {name:'ollama', description:'Ollama — local models (charging only)', category:'model', size:'~1.5 GB', verified:false, needs_key:'', chat:'', distros:['debian','ubuntu']},
+  ],
+  openStack: null,
+  chat: {agent:'claude-code', machine:'dev', transcript:[]},
+  console: {machine:'dev', history:[]},
+  keys: ['ANTHROPIC_API_KEY'],
+};
+
+const DISTROS = [
+  ['alpine','Alpine 3.24','~30 MB · smallest, musl'],
+  ['debian','Debian trixie','~400 MB · the agent default'],
+  ['ubuntu','Ubuntu noble','~400 MB · familiar'],
+];
+
+const CHECKS = [
+  ['64-bit ARM processor','arm64-v8a — supported','ok',null],
+  ['Android version','Android 16 — supported','ok',null],
+  ['Engine and proot','both native binaries present and executable','ok',null],
+  ['Free storage','110000 MB available — a Debian machine needs about 400 MB','ok',null],
+  ['Battery optimization','Android may freeze downloads and running machines when the screen is off. This is the single most useful setting to change.','warn','allow'],
+  ['samsung power manager','Settings → Battery → Background usage limits: make sure Cellar is not in “Sleeping apps” or “Deep sleeping apps”.','info','open settings'],
+  ['Phantom process killer','Android 12+ kills apps that run more than 32 child processes. No app can change this — it needs ADB or Shizuku. Cellar keeps one process per machine so it rarely matters.','info',null],
+];
+
+const el = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- work simulation: mirrors the non-blocking activity strip ----------
+function work(label, lines, done) {
+  if (state.busy) return;
+  state.busy = label;
+  state.log = [];
+  render();
+  let i = 0;
+  const tick = () => {
+    if (i < lines.length) {
+      state.log.push(lines[i++]);
+      renderStrip();
+      setTimeout(tick, 420);
+    } else {
+      state.busy = null;
+      if (done) done();
+      render();
+      // A finished job shouldn't keep eating a phone screen: fade the
+      // strip out on its own, unless the log is open and being read.
+      setTimeout(() => {
+        if (!state.busy && el('striplog').classList.contains('hidden')) {
+          state.log = [];
+          renderStrip();
+        }
+      }, 6000);
+    }
+  };
+  setTimeout(tick, 300);
+}
+
+function renderStrip() {
+  const busy = !!state.busy;
+  const show = busy || state.log.length;
+  el('strip').classList.toggle('hidden', !show);
+  if (!show) return;
+  el('strip').className = 'card ' + (busy ? 'accent-amber' : 'accent-green');
+  el('stripdot').style.color = busy ? 'var(--amber)' : 'var(--green)';
+  el('stripdot').classList.toggle('pulse', busy);
+  el('striplabel').textContent = busy ? state.busy : 'done';
+  el('striplast').textContent = (state.log[state.log.length - 1] || '').slice(0, 70);
+  el('stripclose').classList.toggle('hidden', busy);
+  el('striplog').innerHTML = state.log.map(esc).join('\n');
+}
+
+el('striptoggle').onclick = () => {
+  const l = el('striplog');
+  l.classList.toggle('hidden');
+  el('striptoggle').textContent = l.classList.contains('hidden') ? 'log' : 'hide';
+};
+el('stripclose').onclick = () => { state.log = []; renderStrip(); };
+
+// ---------- tabs ----------
+document.querySelectorAll('#nav button').forEach(b => {
+  b.onclick = () => {
+    state.tab = b.dataset.tab;
+    document.querySelectorAll('#nav button').forEach(x =>
+      x.toggleAttribute('aria-current', x === b) || x.setAttribute('aria-current', x === b ? 'page' : 'false'));
+    document.querySelectorAll('#nav button').forEach(x => {
+      if (x === b) x.setAttribute('aria-current', 'page'); else x.removeAttribute('aria-current');
+    });
+    el('main').scrollTop = 0;
+    render();
+  };
+});
+
+// ---------- renderers ----------
+function machineCard(m) {
+  const tint = m.broken ? 'red' : (m.running ? 'green' : 'muted');
+  const dotColor = m.broken ? 'var(--red)' : (m.running ? 'var(--green)' : 'var(--dim)');
+  const sub = m.broken ? 'interrupted create — remove to clean up'
+    : `${m.distro} ${m.release} · ${m.running ? 'pid ' + m.pid : 'stopped'}`;
+  const actions = m.broken
+    ? `<button class="pill red" data-act="remove" data-m="${m.name}">remove</button>`
+    : `${m.running
+        ? `<button class="pill amber" data-act="stop" data-m="${m.name}">stop</button>`
+        : `<button class="pill green filled" data-act="start" data-m="${m.name}"><span>start</span></button>`}
+       <button class="pill" data-act="logs" data-m="${m.name}">logs</button>
+       <button class="pill red" data-act="remove" data-m="${m.name}">remove</button>`;
+  return `<div class="card ${m.running ? 'accent-green' : ''}">
+    <div class="row">
+      <i class="dot ${m.running ? 'pulse' : ''}" style="color:${dotColor}"></i>
+      <div class="grow"><div class="name">${esc(m.name)}</div><div class="sub">${esc(sub)}</div></div>
+    </div>
+    <div class="actions">${actions}</div>
+  </div>`;
+}
+
+function renderMachines() {
+  const s = el('tab-machines');
+  if (state.creating) {
+    s.innerHTML = `<div class="section"><h2>PICK A DISTRO</h2>
+      <div class="right"><button class="pill" id="cancelcreate">cancel</button></div></div>
+      ${DISTROS.map(([id, t, sub]) => `<div class="card" data-distro="${id}" style="cursor:pointer">
+        <div class="row"><div class="grow"><div style="font-size:15px">${t}</div>
+        <div class="sub">${sub}</div></div><div style="color:var(--amber);font-size:20px">→</div></div></div>`).join('')}
+      <p class="hint">downloads a verified rootfs over your current network</p>`;
+    el('cancelcreate').onclick = () => { state.creating = false; render(); };
+    s.querySelectorAll('[data-distro]').forEach(c => c.onclick = () => {
+      const d = c.dataset.distro;
+      state.creating = false;
+      const name = state.machines.some(m => m.name === d) ? d + '-2' : d;
+      work(`creating ${name}`, [
+        `downloading ${d} (20260724_05:24) ...`,
+        'downloaded 90.3 MB, sha256 ok',
+        'extracting ...',
+        `machine "${name}" ready (${d})`,
+      ], () => state.machines.push({name, distro:d, release:d==='debian'?'trixie':(d==='alpine'?'3.24':'noble'), running:false, pid:0, broken:false}));
+    });
+    return;
+  }
+  s.innerHTML = `<div class="section"><h2>MACHINES</h2>
+      <div class="right">${state.busy ? '' : '<button class="pill amber filled" id="newmachine"><span>+ new</span></button>'}</div></div>
+    ${state.machines.length ? state.machines.map(machineCard).join('')
+      : `<div class="card"><div style="font-size:15px">no machines yet</div>
+         <p class="desc">tap “+ new” for a Linux machine, or open the catalog and pick something to run</p></div>`}`;
+  if (el('newmachine')) el('newmachine').onclick = () => { state.creating = true; render(); };
+  s.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+    const m = state.machines.find(x => x.name === b.dataset.m);
+    if (b.dataset.act === 'start') work(`starting ${m.name}`, ['started'], () => { m.running = true; m.pid = 32100; });
+    if (b.dataset.act === 'stop') work(`stopping ${m.name}`, ['stopped'], () => { m.running = false; m.pid = 0; });
+    if (b.dataset.act === 'remove') work(`removing ${m.name}`, ['removed'], () => {
+      state.machines = state.machines.filter(x => x.name !== m.name);
+    });
+    if (b.dataset.act === 'logs') work(`logs ${m.name}`, [
+      '--- cellar start 2026-07-25T21:52:04Z ---', 'Fri Jul 25 21:52:04 UTC 2026', 'Fri Jul 25 21:52:09 UTC 2026',
+    ]);
+  });
+}
+
+function stackCard(st) {
+  const open = state.openStack === st.name;
+  const notes = [st.category, st.size, st.needs_key ? 'needs ' + st.needs_key : null].filter(Boolean).join(' · ');
+  const usable = state.machines.filter(m => !m.broken && (!st.distros.length || st.distros.includes(m.distro)));
+  const body = !open ? '' : (usable.length
+    ? `<div style="margin-top:14px"><div class="hint">install into:</div>
+       <div class="actions">${usable.map(m => `<button class="pill green filled" data-install="${st.name}" data-m="${m.name}"><span>${m.name}</span></button>`).join('')}</div></div>`
+    : `<p class="note" style="color:var(--amber);margin-top:14px">needs a ${st.distros.join('/')} machine — create one first</p>`);
+  return `<div class="card ${open ? 'accent-amber' : ''}" data-stack="${st.name}" style="cursor:pointer">
+    <div class="row"><div class="grow">
+      <div class="name" style="font-size:16px">${esc(st.name)}</div>
+      <div class="desc">${esc(st.description)}</div>
+      ${notes ? `<div class="note">${esc(notes)}</div>` : ''}
+    </div><div style="color:${st.verified ? 'var(--green)' : 'var(--amber)'};font-size:15px">${st.verified ? '✓' : '?'}</div></div>
+    ${body}</div>`;
+}
+
+function renderCatalog() {
+  const s = el('tab-catalog');
+  if (!state.machines.length) {
+    s.innerHTML = `<div class="section"><h2>ONE-TAP STACKS</h2></div>
+      <div class="card"><div style="font-size:15px">create a machine first</div>
+      <p class="desc">stacks install into a machine — make one on the machines tab</p></div>`;
+    return;
+  }
+  const v = state.stacks.filter(x => x.verified), u = state.stacks.filter(x => !x.verified);
+  s.innerHTML = `<div class="section"><h2>ONE-TAP STACKS</h2></div>
+    ${v.map(stackCard).join('')}
+    ${u.length ? `<div class="section" style="margin-top:18px"><h2>NOT YET VERIFIED ON A PHONE</h2></div>${u.map(stackCard).join('')}` : ''}`;
+  s.querySelectorAll('[data-stack]').forEach(c => c.onclick = e => {
+    if (e.target.closest('[data-install]')) return;
+    state.openStack = state.openStack === c.dataset.stack ? null : c.dataset.stack;
+    render();
+  });
+  s.querySelectorAll('[data-install]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    work(`installing ${b.dataset.install} → ${b.dataset.m}`, [
+      'applying ' + b.dataset.install + ' ...', 'Reading package lists...', 'added 1 package', 'done',
+    ]);
+  });
+}
+
+function renderChat() {
+  const s = el('tab-chat');
+  const agents = state.stacks.filter(x => x.chat);
+  const usable = state.machines.filter(m => !m.broken);
+  if (!agents.length || !usable.length) {
+    s.innerHTML = `<div class="section"><h2>CHAT</h2></div>
+      <div class="card"><div style="font-size:15px">nothing to chat with yet</div>
+      <p class="desc">install an agent from the catalog, then add its API key on the setup tab</p></div>`;
+    return;
+  }
+  s.innerHTML = `<div class="section"><h2>CHAT</h2>
+      <div class="right">${state.chat.transcript.length ? '<button class="pill" id="clearchat">clear</button>' : ''}</div></div>
+    <div class="card">
+      <label class="tiny">agent</label>
+      <div class="chips">${agents.map(a => `<button class="pill amber ${a.name===state.chat.agent?'filled':''}" data-agent="${a.name}"><span>${a.name}</span></button>`).join('')}</div>
+      <label class="tiny" style="margin-top:14px">machine</label>
+      <div class="chips">${usable.map(m => `<button class="pill green ${m.name===state.chat.machine?'filled':''}" data-cm="${m.name}"><span>${m.name}</span></button>`).join('')}</div>
+    </div>
+    <div class="output ${state.chat.transcript.length?'':'empty'}" id="chatout">${state.chat.transcript.length
+      ? state.chat.transcript.map(l => l.startsWith('>') ? `<span class="cmd">${esc(l)}</span>` : esc(l)).join('\n')
+      : `ask something — it runs inside ${state.chat.machine} and answers here`}</div>
+    <div style="margin-top:12px"><input type="text" id="chatin" placeholder="message…"></div>
+    <div class="actions"><button class="pill amber filled" id="send"><span>send</span></button></div>`;
+  s.querySelectorAll('[data-agent]').forEach(b => b.onclick = () => { state.chat.agent = b.dataset.agent; render(); });
+  s.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => { state.chat.machine = b.dataset.cm; render(); });
+  if (el('clearchat')) el('clearchat').onclick = () => { state.chat.transcript = []; render(); };
+  el('send').onclick = () => {
+    const v = el('chatin').value.trim();
+    if (!v) return;
+    state.chat.transcript.push('> ' + v, 'Running ' + state.chat.agent + ' inside ' + state.chat.machine + '…', '(preview: no real model call)', '');
+    render();
+    el('chatout').scrollTop = el('chatout').scrollHeight;
+  };
+}
+
+const QUICK = ['ls -la', 'df -h /', 'free -m', 'apt update', 'ps aux | head'];
+
+function renderConsole() {
+  const s = el('tab-console');
+  const usable = state.machines.filter(m => !m.broken);
+  if (!usable.length) {
+    s.innerHTML = `<div class="section"><h2>CONSOLE</h2></div>
+      <div class="card"><div style="font-size:15px">no machine to run in</div>
+      <p class="desc">create one on the machines tab</p></div>`;
+    return;
+  }
+  s.innerHTML = `<div class="section"><h2>CONSOLE</h2>
+      <div class="right">${state.console.history.length ? '<button class="pill" id="clearcon">clear</button>' : ''}</div></div>
+    <div class="chips">${usable.map(m => `<button class="pill green ${m.name===state.console.machine?'filled':''}" data-conm="${m.name}"><span>${m.name}</span></button>`).join('')}</div>
+    <div style="margin-top:14px">${state.console.history.map(h => `<div class="card">
+      <div class="row"><span style="color:var(--green);font-family:var(--mono);font-weight:700">$</span>
+      <span style="font-family:var(--mono);font-size:12px">${esc(h.cmd)}</span></div>
+      ${h.out.length ? `<div style="margin-top:10px;font-family:var(--mono);font-size:11px;line-height:16px;color:var(--muted);white-space:pre-wrap">${esc(h.out.join('\n'))}</div>` : ''}
+    </div>`).join('')}</div>
+    <div class="row" style="gap:8px"><input type="text" id="conin" placeholder="type a command…" style="flex:1">
+    <button class="pill amber filled" id="runcmd"><span>run</span></button></div>
+    <div class="chips" style="margin-top:12px">${QUICK.map(q => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    <p class="hint" style="margin-top:10px">one command at a time — not a full terminal yet (no vim/htop)</p>`;
+  s.querySelectorAll('[data-conm]').forEach(b => b.onclick = () => { state.console.machine = b.dataset.conm; render(); });
+  s.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { el('conin').value = b.dataset.q; el('conin').focus(); });
+  if (el('clearcon')) el('clearcon').onclick = () => { state.console.history = []; render(); };
+  el('runcmd').onclick = () => {
+    const v = el('conin').value.trim();
+    if (!v) return;
+    state.console.history.push({cmd: v, out: ['(preview) output would appear here']});
+    render();
+    el('main').scrollTop = el('main').scrollHeight; // newest command in view
+  };
+}
+
+function renderSetup() {
+  const s = el('tab-setup');
+  s.innerHTML = `<div class="section"><h2>THIS PHONE</h2>
+      <div class="right"><button class="pill" id="recheck">re-check</button></div></div>
+    ${CHECKS.map(([title, detail, st, act]) => {
+      const color = st === 'ok' ? 'var(--green)' : st === 'warn' ? 'var(--amber)' : st === 'blocked' ? 'var(--red)' : 'var(--muted)';
+      const cls = st === 'ok' ? '' : (st === 'warn' ? 'accent-amber' : st === 'blocked' ? 'accent-red' : '');
+      return `<div class="card ${cls}">
+        <div class="row"><i class="dot" style="color:${color}"></i>
+        <div class="grow" style="font-size:14px;font-weight:600">${esc(title)}</div>
+        ${act ? `<button class="pill amber ${st==='warn'?'filled':''}"><span>${act}</span></button>` : ''}</div>
+        <p class="desc" style="margin-top:8px">${esc(detail)}</p></div>`;
+    }).join('')}
+    <div class="section" style="margin-top:18px"><h2>API KEYS</h2></div>
+    <p class="hint">encrypted by the Android Keystore and injected only while a command runs — never written into a machine, never included in an export</p>
+    <div style="margin-top:12px">${state.keys.map(k => `<div class="card"><div class="row">
+      <div class="grow"><div style="font-family:var(--mono);font-size:13px">${esc(k)}</div>
+      <div class="note">sk-a…f21c</div></div>
+      <button class="pill red" data-forget="${esc(k)}">forget</button></div></div>`).join('')}</div>
+    <input type="text" id="keyname" value="ANTHROPIC_API_KEY">
+    <div style="margin-top:8px"><input type="password" id="keyval" placeholder="paste the key"></div>
+    <div class="actions"><button class="pill green filled" id="savekey"><span>save key</span></button></div>`;
+  s.querySelectorAll('[data-forget]').forEach(b => b.onclick = () => {
+    state.keys = state.keys.filter(k => k !== b.dataset.forget);
+    render();
+  });
+  el('savekey').onclick = () => {
+    const n = el('keyname').value.trim();
+    if (n && !state.keys.includes(n)) state.keys.push(n);
+    el('keyval').value = '';
+    render();
+  };
+}
+
+function render() {
+  ['machines','catalog','chat','console','setup'].forEach(t =>
+    el('tab-' + t).classList.toggle('hidden', state.tab !== t));
+  const up = state.machines.filter(m => m.running).length;
+  el('upcount').classList.toggle('hidden', up === 0);
+  el('upn').textContent = up + ' up';
+  renderStrip();
+  if (state.tab === 'machines') renderMachines();
+  if (state.tab === 'catalog') renderCatalog();
+  if (state.tab === 'chat') renderChat();
+  if (state.tab === 'console') renderConsole();
+  if (state.tab === 'setup') renderSetup();
+}
+
+render();
+</script>
+</body>
+</html>
