@@ -4,6 +4,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Release builds derive their version from the git tag CI passes in
+// (-PcellarVersion=0.4.0), so a published APK always reports the version
+// it was released as. Local builds fall back to a dev marker.
+val cellarVersion = (findProperty("cellarVersion") as String?) ?: "0.0.0-dev"
+
 android {
     // Kotlin package is app.cellar ("in" is a Kotlin keyword, so the
     // in.parallex.* store id stays out of source paths).
@@ -14,8 +19,12 @@ android {
         applicationId = "in.parallex.cellar"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // monotonic from the version: 0.4.0 -> 400
+        versionCode = cellarVersion.removeSuffix("-dev").split(".").let {
+            val p = it.mapNotNull { s -> s.toIntOrNull() }
+            if (p.size >= 3) p[0] * 10000 + p[1] * 100 + p[2] else 1
+        }
+        versionName = cellarVersion
         ndk { abiFilters += "arm64-v8a" }
     }
 
