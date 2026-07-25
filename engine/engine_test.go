@@ -177,6 +177,7 @@ func TestDNSServers(t *testing.T) {
 
 func TestGuestEnvClean(t *testing.T) {
 	t.Setenv("LD_PRELOAD", "/system/evil.so")
+	t.Setenv("PROOT_LOADER", "/app/lib/libproot_loader.so")
 	env := guestEnv([]string{"FOO=bar"})
 	joined := strings.Join(env, "\n")
 	if strings.Contains(joined, "LD_PRELOAD") {
@@ -184,5 +185,10 @@ func TestGuestEnvClean(t *testing.T) {
 	}
 	if !strings.Contains(joined, "FOO=bar") || !strings.Contains(joined, "HOME=/root") {
 		t.Fatalf("missing expected entries in %v", env)
+	}
+	// the app sets PROOT_LOADER (W^X: proot can't extract its own loader
+	// there) — the clean env must pass it through
+	if !strings.Contains(joined, "PROOT_LOADER=/app/lib/libproot_loader.so") {
+		t.Fatalf("PROOT_LOADER stripped from guest env: %v", env)
 	}
 }

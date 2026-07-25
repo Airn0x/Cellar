@@ -61,6 +61,14 @@ func guestEnv(extra []string) []string {
 	if t := os.Getenv("TMPDIR"); t != "" {
 		env = append(env, "PROOT_TMP_DIR="+t)
 	}
+	// Inside an app, proot cannot extract its embedded loader (W^X blocks
+	// exec from writable storage) — the host sets PROOT_LOADER to a
+	// jniLib path, and the clean env must not strip it.
+	for _, k := range []string{"PROOT_LOADER", "PROOT_LOADER_32"} {
+		if v := os.Getenv(k); v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
 	// proot's seccomp fast path races with node/npm process management
 	// ("Exit handler never called!") — trade speed for correctness.
 	// CELLAR_SECCOMP=1 re-enables the fast path for benchmarking.

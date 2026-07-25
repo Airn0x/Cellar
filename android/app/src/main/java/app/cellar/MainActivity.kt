@@ -43,21 +43,43 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // M2 step 3's whole point: prove the Go engine executes inside this
-    // app's sandbox, from nativeLibraryDir, before any real UI exists.
+    // M2 step 3-4: prove BOTH native binaries work inside the app sandbox
+    // — the engine exec's from nativeLibraryDir (the only W^X-legal spot),
+    // and proot runs with an unbundled loader (it cannot extract its own
+    // embedded loader here; see proot/README.md).
     private fun probeEngine(): String {
-        val engine = File(applicationInfo.nativeLibraryDir, "libcellar.so")
+        val libs = File(applicationInfo.nativeLibraryDir)
+        val engine = File(libs, "libcellar.so")
+        val proot = File(libs, "libproot.so")
         if (!engine.exists()) return "engine not bundled (local dev build)"
-        return try {
-            val p = ProcessBuilder(engine.absolutePath, "version")
-                .redirectErrorStream(true)
-                .start()
-            val out = p.inputStream.bufferedReader().readText().trim()
-            p.waitFor()
-            if (out.isNotEmpty()) "$out — alive inside the app sandbox" else "engine ran, empty output"
-        } catch (e: Exception) {
-            "engine exec failed: ${e.message}"
+
+        val version = runEngine(engine, proot, "version")
+            ?: return "engine exec failed — W^X or packaging problem"
+        if (!proot.exists()) return "$version · proot not bundled"
+
+        // `ls` touches state dirs and (with no machines) never spawns proot;
+        // it proves the engine can read/write its app-private home.
+        runEngine(engine, proot, "ls", "--json")
+            ?: return "$version · engine cannot use its app-private home"
+        return "$version · engine + proot ready"
+    }
+
+    private fun runEngine(engine: File, proot: File, vararg args: String): String? = try {
+        val home = File(filesDir, "cellar").apply { mkdirs() }
+        val tmp = File(cacheDir, "cellar-tmp").apply { mkdirs() }
+        val pb = ProcessBuilder(listOf(engine.absolutePath) + args).redirectErrorStream(true)
+        pb.environment().apply {
+            put("CELLAR_HOME", home.absolutePath)
+            put("CELLAR_PROOT", proot.absolutePath)
+            put("TMPDIR", tmp.absolutePath)
+            // proot writes its loader nowhere: it's a jniLib already
+            put("PROOT_LOADER", File(engine.parentFile, "libproot_loader.so").absolutePath)
         }
+        val p = pb.start()
+        val out = p.inputStream.bufferedReader().readText().trim()
+        if (p.waitFor() == 0) out else null
+    } catch (e: Exception) {
+        null
     }
 }
 
