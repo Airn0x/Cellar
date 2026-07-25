@@ -12,13 +12,13 @@ import android.os.IBinder
 import android.os.PowerManager
 
 /**
- * The lifecycle anchor. Android will freeze or kill background work —
- * and a rootfs download or a running machine is exactly that — so any
- * long-lived engine work runs while this foreground service holds a
- * notification and a wake lock.
+ * Keeps Cellar alive while it has something to keep alive.
  *
- * Deliberately not a binder/AIDL surface: the UI calls the engine
- * directly and uses this only to say "keep us alive, and here's why".
+ * This matters more than it looks: every proot process is a child of the
+ * app process, so if Android freezes or kills the app, running machines
+ * die with it. The service therefore lives as long as *any* machine is
+ * running — not just for the duration of a button press, which is what
+ * an earlier build did (machines silently stopped in the background).
  */
 class CellarService : Service() {
 
@@ -36,7 +36,7 @@ class CellarService : Service() {
                 acquire(WAKE_LIMIT_MS)
             }
         }
-        return START_NOT_STICKY // work is resumed by the user, never silently
+        return START_NOT_STICKY // work resumes when the user asks, never silently
     }
 
     override fun onDestroy() {
@@ -62,7 +62,7 @@ class CellarService : Service() {
         return Notification.Builder(this, CHANNEL)
             .setContentTitle("cellar")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -76,17 +76,28 @@ class CellarService : Service() {
         // A phone is not a datacenter: never hold the CPU awake forever.
         private const val WAKE_LIMIT_MS = 60L * 60 * 1000
 
-        fun start(context: Context, status: String) {
+        /**
+         * Single entry point: the UI reports what's happening and the
+         * service decides whether it should exist.
+         */
+        fun sync(context: Context, running: Int, busyLabel: String?) {
+            val status = when {
+                busyLabel != null && running > 0 -> "$busyLabel · $running running"
+                busyLabel != null -> busyLabel
+                running == 1 -> "1 machine running"
+                running > 1 -> "$running machines running"
+                else -> null
+            }
+            if (status == null) {
+                context.stopService(Intent(context, CellarService::class.java))
+                return
+            }
             val i = Intent(context, CellarService::class.java).putExtra(EXTRA_STATUS, status)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(i)
             } else {
                 context.startService(i)
             }
-        }
-
-        fun stop(context: Context) {
-            context.stopService(Intent(context, CellarService::class.java))
         }
     }
 }

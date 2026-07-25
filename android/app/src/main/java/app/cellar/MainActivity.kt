@@ -17,8 +17,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val DISTROS = listOf(
@@ -47,20 +52,31 @@ private val DISTROS = listOf(
     Triple("ubuntu", "Ubuntu noble", "~400 MB · familiar"),
 )
 
-private const val TAB_MACHINES = "machines"
-private const val TAB_CATALOG = "catalog"
-private const val TAB_CHAT = "chat"
-private const val TAB_CONSOLE = "console"
-private const val TAB_SETUP = "setup"
+private const val MACHINES = "machines"
+private const val CATALOG = "catalog"
+private const val CHAT = "chat"
+private const val CONSOLE = "console"
+private const val SETUP = "setup"
+
+private val NAV = listOf(
+    MACHINES to "▤",
+    CATALOG to "◈",
+    CHAT to "✦",
+    CONSOLE to "❯",
+    SETUP to "⚙",
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // targetSdk 35 forces edge-to-edge; without this the UI draws
+        // underneath the status bar clock and the gesture bar.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            // only for the foreground-service notification; work runs either way
             registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
                 .launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -77,17 +93,23 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun App(engine: Engine, vault: Vault, context: Context) {
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf(TAB_MACHINES) }
-    var status by remember { mutableStateOf("probing engine…") }
+    var tab by remember { mutableStateOf(MACHINES) }
+    var status by remember { mutableStateOf("starting…") }
     var machines by remember { mutableStateOf<List<Engine.Machine>>(emptyList()) }
     var stacks by remember { mutableStateOf<List<Engine.Stack>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var panelLabel by remember { mutableStateOf<String?>(null) }
+
+    // Work state. `busy` is a label while something runs; the log stays
+    // visible afterwards in a strip the user can dismiss — nothing ever
+    // takes over the screen.
+    var busy by remember { mutableStateOf<String?>(null) }
+    var showLog by remember { mutableStateOf(false) }
+    var stripVisible by remember { mutableStateOf(false) }
     val log = remember { mutableStateListOf<String>() }
 
     suspend fun refresh() {
         machines = engine.list()
         if (stacks.isEmpty()) stacks = engine.catalog()
+        CellarService.sync(context, machines.count { it.running }, busy)
     }
 
     LaunchedEffect(Unit) {
@@ -95,91 +117,127 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
         refresh()
     }
 
-    // Every long job runs behind the foreground service, and its output
-    // stays on screen after it finishes until dismissed.
+    // keep the machine list honest while the app is open
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(4000)
+            if (busy == null) refresh()
+        }
+    }
+
     fun work(label: String, block: suspend () -> Unit) {
-        if (busy) return
-        busy = true
-        panelLabel = label
+        if (busy != null) return
+        busy = label
+        stripVisible = true
         log.clear()
-        CellarService.start(context, label)
+        CellarService.sync(context, machines.count { it.running }, label)
         scope.launch {
             try {
                 block()
-                refresh()
+            } catch (e: Exception) {
+                log.add("! ${e.message ?: e.toString()}")
             } finally {
-                busy = false
-                CellarService.stop(context)
+                busy = null
+                refresh()
             }
         }
     }
 
     fun logLine(line: String) {
-        scope.launch { if (log.size > 400) log.removeRange(0, 200); log.add(line) }
+        scope.launch {
+            if (log.size > 300) log.removeRange(0, 150)
+            log.add(line)
+        }
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 18.dp, vertical = 14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().imePadding()) {
+
+        // ---- header ----
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f)) {
-                Text("cellar", color = Ink, fontSize = 24.sp, fontFamily = FontFamily.Monospace)
+                Text("cellar", color = Ink, fontSize = 22.sp, fontFamily = FontFamily.Monospace)
                 Text(
-                    status,
-                    color = if (status.contains("ready")) Green else Amber,
-                    fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                    status, color = if (status.contains("ready")) Green else Amber,
+                    fontSize = 9.sp, fontFamily = FontFamily.Monospace,
+                )
+            }
+            val up = machines.count { it.running }
+            if (up > 0) {
+                StatusDot(Green, pulsing = true)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "$up up", color = Green, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
-        TabBar(
-            listOf(TAB_MACHINES, TAB_CATALOG, TAB_CHAT, TAB_CONSOLE, TAB_SETUP),
-            tab,
-        ) { tab = it }
-        Spacer(Modifier.height(16.dp))
 
-        if (panelLabel != null) {
-            WorkPanel(panelLabel!!, log, busy) { panelLabel = null }
-            return@Column
+        // ---- content ----
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp),
+        ) {
+            if (stripVisible) {
+                ActivityStrip(
+                    label = busy,
+                    lines = log,
+                    expanded = showLog,
+                    onToggle = { showLog = !showLog },
+                    onDismiss = { stripVisible = false; showLog = false },
+                )
+                Spacer(Modifier.height(16.dp))
+            }
+
+            when (tab) {
+                MACHINES -> MachinesTab(
+                    machines = machines,
+                    busy = busy != null,
+                    onCreate = { distro ->
+                        val name = nextName(machines, distro)
+                        work("creating $name") { engine.create(name, distro, ::logLine) }
+                    },
+                    onStart = { m ->
+                        work("starting ${m.name}") {
+                            val r = engine.start(m.name)
+                            // never started before: no init command stored yet
+                            if (!r.ok) engine.run("start", m.name, "--", "sleep infinity")
+                        }
+                    },
+                    onStop = { m -> work("stopping ${m.name}") { engine.stop(m.name) } },
+                    onRemove = { m -> work("removing ${m.name}") { engine.remove(m.name) } },
+                    onLogs = { m ->
+                        work("logs ${m.name}") {
+                            showLog = true
+                            engine.logs(m.name).lines().takeLast(80).forEach(::logLine)
+                        }
+                    },
+                )
+
+                CATALOG -> CatalogTab(
+                    stacks = stacks,
+                    machines = machines,
+                    busy = busy != null,
+                    onInstall = { stack, machine ->
+                        work("installing ${stack.name} → $machine") {
+                            showLog = true
+                            engine.apply(machine, stack.name, ::logLine)
+                        }
+                    },
+                )
+
+                CHAT -> ChatTab(engine, vault, machines, stacks)
+                CONSOLE -> ConsoleTab(engine, machines)
+                SETUP -> SetupTab(engine, vault, context)
+            }
+            Spacer(Modifier.height(24.dp))
         }
 
-        when (tab) {
-            TAB_MACHINES -> MachinesTab(
-                machines = machines,
-                onCreate = { distro ->
-                    val name = nextName(machines, distro)
-                    work("creating $name") { engine.create(name, distro, ::logLine) }
-                },
-                onStart = { m ->
-                    work("starting ${m.name}") {
-                        val r = engine.start(m.name)
-                        // a machine that has never been started has no init
-                        // command yet; give it a long-lived idle one
-                        if (!r.ok) engine.run("start", m.name, "--", "sleep infinity")
-                    }
-                },
-                onStop = { m -> work("stopping ${m.name}") { engine.stop(m.name) } },
-                onRemove = { m -> work("removing ${m.name}") { engine.remove(m.name) } },
-                onLogs = { m ->
-                    work("logs ${m.name}") {
-                        engine.logs(m.name).lines().takeLast(80).forEach(::logLine)
-                    }
-                },
-            )
-
-            TAB_CATALOG -> CatalogTab(
-                stacks = stacks,
-                machines = machines,
-                onInstall = { stack, machine ->
-                    work("installing ${stack.name} → $machine") {
-                        engine.apply(machine, stack.name, ::logLine)
-                    }
-                },
-            )
-
-            TAB_CHAT -> ChatTab(engine, vault, machines, stacks)
-
-            TAB_CONSOLE -> ConsoleTab(engine, machines)
-
-            TAB_SETUP -> SetupTab(engine, vault, context)
+        // ---- bottom nav ----
+        Column(Modifier.navigationBarsPadding()) {
+            BottomNav(NAV, tab) { tab = it }
         }
     }
 }
@@ -194,28 +252,9 @@ private fun nextName(machines: List<Engine.Machine>, distro: String): String {
 }
 
 @Composable
-private fun WorkPanel(label: String, log: List<String>, busy: Boolean, onDismiss: () -> Unit) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (busy) label else "$label · done",
-                color = if (busy) Amber else Green,
-                fontSize = 13.sp, fontFamily = FontFamily.Monospace,
-            )
-            Spacer(Modifier.weight(1f))
-            if (!busy) Pill("close", Muted, onDismiss)
-        }
-        Spacer(Modifier.height(10.dp))
-        OutputPane(
-            log, "working…",
-            Modifier.heightIn(min = 140.dp).verticalScroll(rememberScrollState()),
-        )
-    }
-}
-
-@Composable
 private fun MachinesTab(
     machines: List<Engine.Machine>,
+    busy: Boolean,
     onCreate: (String) -> Unit,
     onStart: (Engine.Machine) -> Unit,
     onStop: (Engine.Machine) -> Unit,
@@ -223,16 +262,13 @@ private fun MachinesTab(
     onLogs: (Engine.Machine) -> Unit,
 ) {
     var creating by remember { mutableStateOf(false) }
-    var open by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle(if (creating) "PICK A DISTRO" else "MACHINES")
-            Spacer(Modifier.weight(1f))
+    Column {
+        SectionTitle(if (creating) "PICK A DISTRO" else "MACHINES") {
             if (creating) Pill("cancel", Muted) { creating = false }
-            else Pill("+ new machine", Amber) { creating = true }
+            else if (!busy) Pill("+ new", Amber, filled = true) { creating = true }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
 
         if (creating) {
             DISTROS.forEach { (id, title, sub) ->
@@ -243,9 +279,12 @@ private fun MachinesTab(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(title, color = Ink, fontSize = 15.sp)
-                            Text(sub, color = Dim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text(
+                                sub, color = Dim, fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
                         }
-                        Text("→", color = Amber, fontSize = 18.sp)
+                        Text("→", color = Amber, fontSize = 20.sp)
                     }
                 }
             }
@@ -258,41 +297,53 @@ private fun MachinesTab(
 
         if (machines.isEmpty()) {
             Card {
-                Text("no machines yet", color = Muted, fontSize = 14.sp)
-                Spacer(Modifier.height(4.dp))
+                Text("no machines yet", color = Ink, fontSize = 15.sp)
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    "tap “+ new machine”, or open the catalog and pick something to run",
-                    color = Dim, fontSize = 12.sp,
+                    "tap “+ new” for a Linux machine, or open the catalog and pick " +
+                        "something to run",
+                    color = Muted, fontSize = 12.sp,
                 )
             }
             return@Column
         }
 
         machines.forEach { m ->
-            Card(Modifier.padding(bottom = 10.dp).clickable {
-                open = if (open == m.name) null else m.name
-            }) {
+            Card(
+                Modifier.padding(bottom = 12.dp),
+                accent = if (m.running) Green else null,
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(
+                        when {
+                            m.broken -> Red
+                            m.running -> Green
+                            else -> Dim
+                        },
+                        pulsing = m.running,
+                    )
+                    Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(m.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (m.broken) "interrupted create" else "${m.distro} ${m.release}",
+                            m.name, color = Ink, fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            when {
+                                m.broken -> "interrupted create — remove to clean up"
+                                m.running -> "${m.distro} ${m.release} · pid ${m.pid}"
+                                else -> "${m.distro} ${m.release} · stopped"
+                            },
                             color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         )
                     }
-                    val (label, tint) = when {
-                        m.broken -> "broken" to Red
-                        m.running -> "up:${m.pid}" to Green
-                        else -> "stopped" to Muted
-                    }
-                    Text(label, color = tint, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
-                if (open == m.name) {
+                if (!busy) {
                     Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!m.broken) {
                             if (m.running) Pill("stop", Amber) { onStop(m) }
-                            else Pill("start", Green) { onStart(m) }
+                            else Pill("start", Green, filled = true) { onStart(m) }
                             Pill("logs", Muted) { onLogs(m) }
                         }
                         Pill("remove", Red) { onRemove(m) }
@@ -307,40 +358,43 @@ private fun MachinesTab(
 private fun CatalogTab(
     stacks: List<Engine.Stack>,
     machines: List<Engine.Machine>,
+    busy: Boolean,
     onInstall: (Engine.Stack, String) -> Unit,
 ) {
     var open by remember { mutableStateOf<String?>(null) }
     val verified = stacks.filter { it.verified }
     val unverified = stacks.filterNot { it.verified }
 
-    Column(Modifier.verticalScroll(rememberScrollState())) {
+    Column {
         SectionTitle("ONE-TAP STACKS")
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
 
         if (machines.isEmpty()) {
             Card {
-                Text("create a machine first", color = Muted, fontSize = 14.sp)
-                Spacer(Modifier.height(4.dp))
-                Text("stacks install into a machine — make one on the machines tab", color = Dim, fontSize = 12.sp)
+                Text("create a machine first", color = Ink, fontSize = 15.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "stacks install into a machine — make one on the machines tab",
+                    color = Muted, fontSize = 12.sp,
+                )
             }
             return@Column
         }
 
         verified.forEach { s ->
-            StackCard(s, machines, open == s.name, { open = if (open == s.name) null else s.name }, onInstall)
+            StackCard(s, machines, open == s.name, busy, {
+                open = if (open == s.name) null else s.name
+            }, onInstall)
         }
 
         if (unverified.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(18.dp))
             SectionTitle("NOT YET VERIFIED ON A PHONE")
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "these should work, but nobody has run them on a real device yet",
-                color = Dim, fontSize = 11.sp,
-            )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             unverified.forEach { s ->
-                StackCard(s, machines, open == s.name, { open = if (open == s.name) null else s.name }, onInstall)
+                StackCard(s, machines, open == s.name, busy, {
+                    open = if (open == s.name) null else s.name
+                }, onInstall)
             }
         }
     }
@@ -351,13 +405,20 @@ private fun StackCard(
     s: Engine.Stack,
     machines: List<Engine.Machine>,
     expanded: Boolean,
+    busy: Boolean,
     onToggle: () -> Unit,
     onInstall: (Engine.Stack, String) -> Unit,
 ) {
-    Card(Modifier.padding(bottom = 10.dp).clickable(onClick = onToggle)) {
+    Card(
+        Modifier.padding(bottom = 10.dp).clickable(onClick = onToggle),
+        accent = if (expanded) Amber else null,
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(s.name, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    s.name, color = Ink, fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Text(s.description, color = Muted, fontSize = 12.sp)
                 val notes = listOfNotNull(
                     s.category.takeIf { it.isNotEmpty() },
@@ -365,13 +426,21 @@ private fun StackCard(
                     s.needsKey.takeIf { it.isNotEmpty() }?.let { "needs $it" },
                 ).joinToString(" · ")
                 if (notes.isNotEmpty()) {
-                    Text(notes, color = Dim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        notes, color = Dim, fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
                 }
             }
-            Text(if (s.verified) "✓" else "?", color = if (s.verified) Green else Amber, fontSize = 14.sp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (s.verified) "✓" else "?",
+                color = if (s.verified) Green else Amber, fontSize = 15.sp,
+            )
         }
-        if (expanded) {
-            Spacer(Modifier.height(12.dp))
+        if (expanded && !busy) {
+            Spacer(Modifier.height(14.dp))
             val usable = machines.filter { !it.broken && s.runsOn(it.distro) }
             if (usable.isEmpty()) {
                 Text(
@@ -382,7 +451,9 @@ private fun StackCard(
                 Text("install into:", color = Dim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    usable.forEach { m -> Pill(m.name, Green) { onInstall(s, m.name) } }
+                    usable.forEach { m ->
+                        Pill(m.name, Green, filled = true) { onInstall(s, m.name) }
+                    }
                 }
             }
         }
