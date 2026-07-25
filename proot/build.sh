@@ -14,7 +14,10 @@ TERMUX_PKG_EXTRA_MAKE_ARGS="-C src"
 export PROOT_UNBUNDLE_LOADER=$TERMUX_PREFIX/libexec/proot
 
 termux_step_pre_configure() {
-	CPPFLAGS+=" -DARG_MAX=131072 -DVERSION=\"${TERMUX_PKG_VERSION}\""
+	# VERSION must reach the compiler as a *string* literal; the double
+	# quotes need single quotes around them to survive the build system's
+	# shell layers (bare 5.1.107.87 is parsed as a bad float constant).
+	CPPFLAGS+=" -DARG_MAX=131072 -DVERSION='\"${TERMUX_PKG_VERSION}\"'"
 	LDFLAGS+=" -static"
 }
 

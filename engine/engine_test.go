@@ -110,16 +110,25 @@ func TestLoadMetaNameAuthority(t *testing.T) {
 }
 
 func TestProotArgs(t *testing.T) {
-	got := prootArgs("/x/rootfs", []string{"/bin/sh", "-c", "id"})
+	got := prootArgs("/x/rootfs", "/x/shm", []string{"/bin/sh", "-c", "id"})
 	want := []string{
 		"--kill-on-exit", "--link2symlink", "-0",
 		"-r", "/x/rootfs",
 		"-b", "/dev", "-b", "/proc", "-b", "/sys",
+		"-b", "/x/shm:/dev/shm",
 		"-w", "/root",
 		"/bin/sh", "-c", "id",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("prootArgs:\n got %v\nwant %v", got, want)
+	}
+	// no shm dir (unwritable state dir) must still produce a usable argv
+	bare := prootArgs("/x/rootfs", "", []string{"id"})
+	if strings.Contains(strings.Join(bare, " "), "/dev/shm") {
+		t.Fatalf("empty shmDir must not add a bind: %v", bare)
+	}
+	if bare[len(bare)-3] != "-w" || bare[len(bare)-1] != "id" {
+		t.Fatalf("argv tail wrong: %v", bare)
 	}
 }
 
@@ -190,5 +199,16 @@ func TestGuestEnvClean(t *testing.T) {
 	// there) — the clean env must pass it through
 	if !strings.Contains(joined, "PROOT_LOADER=/app/lib/libproot_loader.so") {
 		t.Fatalf("PROOT_LOADER stripped from guest env: %v", env)
+	}
+}
+
+func TestParentOfSelf(t *testing.T) {
+	// comm can contain spaces/parens; parsing must survive real /proc
+	ppid, ok := parentOf(os.Getpid())
+	if !ok || ppid != os.Getppid() {
+		t.Fatalf("parentOf(self) = %d,%v want %d", ppid, ok, os.Getppid())
+	}
+	if _, ok := parentOf(-1); ok {
+		t.Fatal("parentOf on a bogus pid must fail")
 	}
 }

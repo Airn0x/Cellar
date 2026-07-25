@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field notes — Cellar docs</title>
-<meta name="description" content="Seven things Android actually does to a Linux engine, found the hard way on a real unrooted phone — each with the fix Cellar ships.">
+<meta name="description" content="Nine things Android actually does to a Linux engine, found the hard way on a real unrooted phone — each with the fix Cellar ships.">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <link rel="stylesheet" href="docs.css">
@@ -40,15 +40,17 @@
       <a href="#suid">4 · suid modes</a>
       <a href="#seccomp">5 · seccomp vs npm</a>
       <a href="#rename">6 · npm rename</a>
-      <a href="#exit">7 · os.Exit</a>
+      <a href="#shm">7 · /dev/shm</a>
+      <a href="#orphans">8 · Orphaned daemons</a>
+      <a href="#exit">9 · os.Exit</a>
       <a href="#proof">Proof</a>
     </div>
   </aside>
 
   <main class="doc">
     <h1>Field notes</h1>
-    <p class="subtitle">Seven things Android actually does to a Linux engine — every one
-      hit for real on a stock, unrooted Android 16 phone while bringing engine v0 up.
+    <p class="subtitle">Nine things Android actually does to a Linux engine — every one
+      hit for real on a stock, unrooted Android 16 phone while bringing the engine up.
       Each cost a debugging round; recorded so they cost nobody a second one.</p>
 
     <h2 id="dns">1 · Static Go binaries can't resolve DNS</h2>
@@ -105,7 +107,34 @@
     <p><strong>Fix:</strong> catalog stacks are idempotent — detect and skip instead of
       reinstalling over a live tree.</p>
 
-    <h2 id="exit">7 · <code>os.Exit</code> skips your deferred cleanup</h2>
+    <h2 id="shm">7 · Android has no <code>/dev/shm</code>, and binding host
+      <code>/dev</code> hides the guest's</h2>
+    <p>Binding the host <code>/dev</code> into a machine is necessary — and it masks
+      whatever <code>/dev/shm</code> the rootfs shipped, because Android simply has no
+      <code>/dev/shm</code>. POSIX shared memory then fails, which quietly takes down
+      Python's <code>multiprocessing</code>, PostgreSQL's dynamic shared memory, and
+      anything Chromium-shaped.</p>
+    <p><strong>Fix:</strong> bind a per-machine host directory over <code>/dev/shm</code>.
+      Verified on-device: before, <code>mp.Queue()</code> raised; after, it round-trips.</p>
+
+    <h2 id="orphans">8 · A hard stop leaks guest daemons — and
+      <code>--kill-on-exit</code> can't help</h2>
+    <p>proot's <code>--kill-on-exit</code> reaps guests when proot exits <em>normally</em>.
+      When a stop escalates to <code>SIGKILL</code> (an init that ignores
+      <code>SIGTERM</code>), proot dies without ever running it, and any guest that called
+      <code>setsid()</code> — sshd, a <code>nohup</code>'d agent — survives in its own
+      process group: invisible to the CLI, still burning Android's 32-child
+      phantom-process budget.</p>
+    <p>Finding those orphans is not obvious. proot fakes chroot via ptrace, so
+      <code>/proc/&lt;pid&gt;/root</code> still shows the <em>host</em> root, and a guest's
+      cmdline is its own argv with no rootfs path in it. <strong>Parentage is the only
+      reliable signal</strong> — walk <code>/proc</code> for <code>PPid</code> and kill
+      proot's descendants deepest-first before killing proot itself. <code>setsid()</code>
+      changes the session, not the parent, so the tree walk still finds them.</p>
+    <p><strong>Measured A/B</strong> on the escalation path: without the descendant kill,
+      one orphan survives; with it, zero.</p>
+
+    <h2 id="exit">9 · <code>os.Exit</code> skips your deferred cleanup</h2>
     <p>Not Android's fault, but found here: an error path that exits the process means
       <code>defer</code>red cleanup never runs — leaving invisible half-created machines
       on disk.</p>

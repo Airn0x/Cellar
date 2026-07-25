@@ -27,7 +27,12 @@ func findProot() (string, error) {
 // cmd inside a machine's rootfs. Mirrors proot-distro's proven flag set:
 // -0 fakes root so apk/apt work, --link2symlink survives no-hardlink
 // filesystems, --kill-on-exit guarantees no orphaned guest processes.
-func prootArgs(rootfs string, cmd []string) []string {
+//
+// shmDir, when non-empty, is bound over the guest's /dev/shm: Android has
+// no /dev/shm, and binding the host /dev masks whatever the rootfs
+// shipped — without this, POSIX shared memory fails and takes Python
+// multiprocessing, PostgreSQL and friends down with it.
+func prootArgs(rootfs, shmDir string, cmd []string) []string {
 	args := []string{
 		"--kill-on-exit",
 		"--link2symlink",
@@ -36,9 +41,22 @@ func prootArgs(rootfs string, cmd []string) []string {
 		"-b", "/dev",
 		"-b", "/proc",
 		"-b", "/sys",
-		"-w", "/root",
 	}
-	return append(args, cmd...)
+	if shmDir != "" {
+		args = append(args, "-b", shmDir+":/dev/shm")
+	}
+	return append(append(args, "-w", "/root"), cmd...)
+}
+
+// machineShm returns the machine's host-side /dev/shm directory, creating
+// it on demand. An unwritable path is not fatal — the bind is simply
+// skipped (better a guest without shm than a machine that won't start).
+func machineShm(name string) string {
+	dir := filepath.Join(machineDir(name), "shm")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	return dir
 }
 
 // guestEnv is the clean environment for the proot process (and therefore
@@ -110,7 +128,7 @@ func runRaw(name string, guestCmd []string, extraEnv []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	cmd := exec.Command(proot, prootArgs(rootfsDir(name), guestCmd)...)
+	cmd := exec.Command(proot, prootArgs(rootfsDir(name), machineShm(name), guestCmd)...)
 	cmd.Env = guestEnv(extraEnv)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err = cmd.Run()
@@ -150,7 +168,7 @@ func startDetached(name string, initCmd string, extraEnv []string) (int, error) 
 	fmt.Fprintf(logf, "\n--- cellar start %s: %s ---\n", time.Now().Format(time.RFC3339), initCmd)
 
 	guestCmd := []string{"/bin/sh", "-c", initCmd}
-	cmd := exec.Command(proot, prootArgs(rootfsDir(name), guestCmd)...)
+	cmd := exec.Command(proot, prootArgs(rootfsDir(name), machineShm(name), guestCmd)...)
 	cmd.Env = guestEnv(extraEnv)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -202,11 +220,71 @@ func stopMachine(name string) error {
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
 	for i := 0; i < 50; i++ {
 		if runningPid(name) == 0 {
-			return nil
+			return nil // proot exited: --kill-on-exit reaped the guests
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// SIGKILL can't be handled, so proot never runs --kill-on-exit: kill
+	// its descendants first, or guest daemons that called setsid() (sshd,
+	// nohup'd agents) survive in another process group — invisible to the
+	// CLI and still counting against Android's phantom-process budget.
+	killDescendants(pid)
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	os.Remove(pidPath(name))
+	killDescendants(pid) // anything re-parented while proot was dying
 	return nil
+}
+
+// killDescendants SIGKILLs every process descended from pid, deepest
+// first. Guests can't be found by filesystem root (proot fakes chroot
+// via ptrace, so /proc/<pid>/root still shows the host's) nor by
+// cmdline (a guest's argv is its own) — parentage is what actually
+// identifies them, and it survives setsid, which only changes session.
+func killDescendants(pid int) {
+	children := map[int][]int{}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		p, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		if ppid, ok := parentOf(p); ok {
+			children[ppid] = append(children[ppid], p)
+		}
+	}
+	var walk func(int) []int
+	walk = func(p int) []int {
+		var out []int
+		for _, c := range children[p] {
+			out = append(out, walk(c)...)
+			out = append(out, c)
+		}
+		return out
+	}
+	for _, p := range walk(pid) { // deepest first: no re-parenting races
+		_ = syscall.Kill(p, syscall.SIGKILL)
+	}
+}
+
+// parentOf reads PPid from /proc/<pid>/stat. The comm field can contain
+// spaces and parentheses, so the fields after the final ')' are what
+// can be split safely.
+func parentOf(pid int) (int, bool) {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, false
+	}
+	i := strings.LastIndexByte(string(b), ')')
+	if i < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(string(b)[i+1:]) // [0]=state, [1]=ppid
+	if len(fields) < 2 {
+		return 0, false
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	return ppid, err == nil
 }

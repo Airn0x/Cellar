@@ -1,6 +1,6 @@
 # Field notes — what Android actually does to a Linux engine
 
-Everything below was hit for real while bringing engine v0 up on a stock, unrooted
+Every entry below was hit for real while bringing engine v0 up on a stock, unrooted
 Android 16 phone (Termux host). Each one cost a debugging round; recorded here so they
 cost nobody a second one. This file is the raw material for the "surviving Android"
 write-ups promised in the plan.
@@ -63,7 +63,33 @@ that rename fails with `ENOTEMPTY`. First install works, second breaks.
 **Fix:** catalog stacks are idempotent — skip when the tool is already present instead
 of reinstalling over it.
 
-## 7. `os.Exit` skips your deferred cleanup
+## 7. Android has no `/dev/shm`, and binding host `/dev` hides the guest's
+
+Binding the host `/dev` into a machine is necessary — and it masks whatever `/dev/shm`
+the rootfs shipped, because Android simply has no `/dev/shm`. POSIX shared memory then
+fails, which quietly takes down Python's `multiprocessing` (`FileNotFoundError` out of
+`sem_open`), PostgreSQL's dynamic shared memory, and anything Chromium-shaped.
+
+**Fix:** bind a per-machine host directory over `/dev/shm`. Verified on-device: before,
+`mp.Queue()` raised; after, it round-trips.
+
+## 8. A hard stop leaks guest daemons — and `--kill-on-exit` can't help
+
+proot's `--kill-on-exit` reaps guests when proot exits *normally*. When a stop escalates
+to `SIGKILL` (an init that ignores `SIGTERM`), proot dies without ever running it, and
+any guest that called `setsid()` — sshd, a `nohup`'d agent — survives in its own process
+group: invisible to the CLI, still burning Android's 32-child phantom-process budget.
+
+Finding those orphans is not obvious. proot fakes chroot via ptrace, so
+`/proc/<pid>/root` still shows the *host* root, and a guest's cmdline is its own argv
+with no rootfs path in it. **Parentage is the only reliable signal** — walk `/proc` for
+`PPid` and kill proot's descendants deepest-first before killing proot itself.
+`setsid()` changes the session, not the parent, so the tree walk still finds them.
+
+Measured A/B on the escalation path: without the descendant kill, one orphan survives;
+with it, zero.
+
+## 9. `os.Exit` skips your deferred cleanup
 
 Not Android's fault, but found here: an error-path `die()` (which calls `os.Exit`)
 means `defer`red cleanup never runs, leaving half-created machines on disk.
