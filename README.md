@@ -7,8 +7,10 @@ server built to run AI setups: agent harnesses, coding agents, MCP servers, sche
 and small local models. Pick a distro, tap to start it, install an agent stack from the
 catalog, and manage everything from a native console UI.
 
-> **Status: pre-alpha — design phase.** The full technical plan lives in
-> [`docs/PLAN.md`](docs/PLAN.md). The engine prototype comes first; the app follows.
+> **Status: pre-alpha — engine v0 works.** Machines create/run/stop on a real unrooted
+> phone, and Claude Code installs and runs inside one (see
+> [`docs/FIELD-NOTES.md`](docs/FIELD-NOTES.md) for the Android battle scars). The full
+> technical plan lives in [`docs/PLAN.md`](docs/PLAN.md). The Android app is next.
 
 ## Why a phone?
 
@@ -37,6 +39,22 @@ A phone is the worst place to host a website and a surprisingly good place to ho
   cards, live logs, a real terminal per machine.
 - **Reachability** — phones live behind carrier NAT, so sharing a server means a tunnel
   (Tailscale / cloudflared integration planned).
+
+## Try it today (Termux, pre-app)
+
+The engine is a standalone CLI already usable under [Termux](https://termux.dev):
+
+```sh
+pkg install proot golang git
+git clone https://github.com/Airn0x/Cellar && cd Cellar/engine
+go build -o cellar . && export PATH="$PATH:$PWD"
+
+cellar create dev --distro debian      # alpine and ubuntu work too
+cellar shell dev                       # a root shell on your new machine
+cellar apply dev claude-code           # or: python-uv, node, sshd
+cellar exec dev -e ANTHROPIC_API_KEY=sk-... -- claude -p "hello from my phone"
+cellar start dev -- '/usr/sbin/sshd -D -e'   # daemons, with logs + stop
+```
 
 ## What it deliberately is not
 

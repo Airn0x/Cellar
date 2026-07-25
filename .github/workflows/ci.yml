@@ -1,0 +1,39 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false # zero-dependency module, nothing to cache
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      - name: build arm64 (the real target)
+        run: CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o cellar-arm64 .
+      - name: build amd64 (dev boxes)
+        run: CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o cellar-amd64 .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cellar-binaries
+          path: engine/cellar-*
+
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck stacks
+        run: shellcheck catalog/*/apply.sh

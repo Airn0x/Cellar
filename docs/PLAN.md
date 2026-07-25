@@ -1,6 +1,8 @@
 # Cellar — technical plan
 
-*Last updated: 2026-07-24 · status: design phase, nothing built yet.*
+*Last updated: 2026-07-25 · status: M1 engine v0 built and verified on-device
+(alpine + debian machines, all four catalog stacks, Claude Code runs inside);
+dogfood week in progress. Android gotchas hit along the way: [FIELD-NOTES.md](FIELD-NOTES.md).*
 
 Cellar turns an unrooted Android phone into a rootless Linux server focused on **running
 AI agents and harnesses**, managed from a native GUI. This document is the complete

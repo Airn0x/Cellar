@@ -1,0 +1,4 @@
+{
+  "name": "sshd",
+  "description": "OpenSSH server on port 2222 (set a root password first: cellar exec <m> -- passwd)"
+}

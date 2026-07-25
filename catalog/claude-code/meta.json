@@ -1,0 +1,5 @@
+{
+  "name": "claude-code",
+  "description": "Claude Code agent harness (needs glibc: debian/ubuntu)",
+  "distros": ["debian", "ubuntu"]
+}
