@@ -38,25 +38,53 @@ class Engine(context: Context) {
         val broken: Boolean,
     )
 
+    private fun processBuilder(args: List<String>): ProcessBuilder {
+        home.mkdirs(); tmp.mkdirs()
+        val pb = ProcessBuilder(listOf(engineBin.absolutePath) + args).redirectErrorStream(true)
+        pb.environment().apply {
+            put("CELLAR_HOME", home.absolutePath)
+            put("CELLAR_PROOT", prootBin.absolutePath)
+            put("PROOT_LOADER", loaderBin.absolutePath)
+            put("TMPDIR", tmp.absolutePath)
+        }
+        return pb
+    }
+
     /** Runs the engine and returns its combined output. */
     suspend fun run(vararg args: String): Result = withContext(Dispatchers.IO) {
         if (!isBundled) return@withContext Result(false, "engine binary missing")
-        home.mkdirs(); tmp.mkdirs()
         try {
-            val pb = ProcessBuilder(listOf(engineBin.absolutePath) + args).redirectErrorStream(true)
-            pb.environment().apply {
-                put("CELLAR_HOME", home.absolutePath)
-                put("CELLAR_PROOT", prootBin.absolutePath)
-                put("PROOT_LOADER", loaderBin.absolutePath)
-                put("TMPDIR", tmp.absolutePath)
-            }
-            val p = pb.start()
+            val p = processBuilder(args.toList()).start()
             val out = p.inputStream.bufferedReader().readText().trim()
             Result(p.waitFor() == 0, out)
         } catch (e: Exception) {
             Result(false, e.message ?: e.toString())
         }
     }
+
+    /**
+     * Runs the engine, delivering each output line as it arrives — the
+     * engine's own progress lines ("downloaded 90.3 MB, sha256 ok") are
+     * the create wizard's progress UI. Honest beats invented percentages.
+     */
+    suspend fun stream(vararg args: String, onLine: (String) -> Unit): Result =
+        withContext(Dispatchers.IO) {
+            if (!isBundled) return@withContext Result(false, "engine binary missing")
+            try {
+                val p = processBuilder(args.toList()).start()
+                val last = StringBuilder()
+                p.inputStream.bufferedReader().forEachLine { line ->
+                    if (line.isNotBlank()) {
+                        onLine(line)
+                        last.setLength(0)
+                        last.append(line)
+                    }
+                }
+                Result(p.waitFor() == 0, last.toString())
+            } catch (e: Exception) {
+                Result(false, e.message ?: e.toString())
+            }
+        }
 
     suspend fun version(): String? = run("version").let { if (it.ok) it.output else null }
 
@@ -80,6 +108,17 @@ class Engine(context: Context) {
             emptyList()
         }
     }
+
+    suspend fun create(name: String, distro: String, onLine: (String) -> Unit): Result =
+        stream("create", name, "--distro", distro, onLine = onLine)
+
+    suspend fun start(name: String): Result = run("start", name)
+
+    suspend fun stop(name: String): Result = run("stop", name)
+
+    suspend fun remove(name: String): Result = run("rm", name, "--force")
+
+    suspend fun logs(name: String): String = run("logs", name).output
 
     /** One-line health summary for the dashboard. */
     suspend fun status(): String {
