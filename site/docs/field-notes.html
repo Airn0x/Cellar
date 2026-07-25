@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field notes — Cellar docs</title>
-<meta name="description" content="Nine things Android actually does to a Linux engine, found the hard way on a real unrooted phone — each with the fix Cellar ships.">
+<meta name="description" content="Eleven things Android actually does to a Linux engine, found the hard way on a real unrooted phone — each with the fix Cellar ships.">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
 <link rel="stylesheet" href="docs.css">
@@ -42,14 +42,16 @@
       <a href="#rename">6 · npm rename</a>
       <a href="#shm">7 · /dev/shm</a>
       <a href="#orphans">8 · Orphaned daemons</a>
-      <a href="#exit">9 · os.Exit</a>
+      <a href="#uvlinks">9 · Hardlinks inside</a>
+      <a href="#tty">10 · Installers want a TTY</a>
+      <a href="#exit">11 · os.Exit</a>
       <a href="#proof">Proof</a>
     </div>
   </aside>
 
   <main class="doc">
     <h1>Field notes</h1>
-    <p class="subtitle">Nine things Android actually does to a Linux engine — every one
+    <p class="subtitle">Eleven things Android actually does to a Linux engine — every one
       hit for real on a stock, unrooted Android 16 phone while bringing the engine up.
       Each cost a debugging round; recorded so they cost nobody a second one.</p>
 
@@ -134,7 +136,25 @@
     <p><strong>Measured A/B</strong> on the escalation path: without the descendant kill,
       one orphan survives; with it, zero.</p>
 
-    <h2 id="exit">9 · <code>os.Exit</code> skips your deferred cleanup</h2>
+    <h2 id="uvlinks">9 · The hardlink ban reaches <em>inside</em> the machine too</h2>
+    <p>Extraction isn't the only thing that hardlinks. Modern package managers link from a
+      local cache to save space — <code>uv</code> does by default — so installing Aider
+      inside a machine dies with <code>Operation not permitted</code>, the same SELinux
+      rule as note 3, one layer deeper. The <em>second</em> attempt then fails differently:
+      proot's <code>--link2symlink</code> leaves symlink chains behind and reads through the
+      half-built cache hit <code>ELOOP</code>.</p>
+    <p><strong>Fix:</strong> tell the tool to copy (<code>UV_LINK_MODE=copy</code>) and clear
+      any cache a failed hardlink run poisoned — both inside the catalog stack, so a user
+      never meets either error.</p>
+
+    <h2 id="tty">10 · Installers assume a TTY that machine commands don't have</h2>
+    <p>Vendor install scripts often end in an interactive configurator. Goose's did, and it
+      died on <code>/dev/tty: No such device or address</code>. Most have an opt-out; the
+      trap is <em>where</em> the variable goes — <code>VAR=false curl … | bash</code> sets it
+      for <code>curl</code>, not for the shell that runs the installer. It belongs on the
+      right: <code>curl … | VAR=false bash</code>.</p>
+
+    <h2 id="exit">11 · <code>os.Exit</code> skips your deferred cleanup</h2>
     <p>Not Android's fault, but found here: an error path that exits the process means
       <code>defer</code>red cleanup never runs — leaving invisible half-created machines
       on disk.</p>
