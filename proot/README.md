@@ -40,7 +40,11 @@ mkdir -p termux-packages/packages/proot-apk
 cp build.sh termux-packages/packages/proot-apk/build.sh
 cd termux-packages
 ./scripts/run-docker.sh ./build-package.sh -a aarch64 proot-apk
-# artifacts: libproot.so, libproot_loader.so in the repo root
+
+# the build container can't write to the repo, so unpack the .deb it made
+dpkg-deb -x output/proot-apk_*_aarch64.deb unpacked
+cp unpacked/data/data/com.termux/files/usr/bin/proot            libproot.so
+cp unpacked/data/data/com.termux/files/usr/libexec/proot/loader libproot_loader.so
 ```
 
 Both artifacts must pass:

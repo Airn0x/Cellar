@@ -61,8 +61,14 @@ jobs:
           cp proot/build.sh termux-packages/packages/proot-apk/build.sh
           cd termux-packages
           ./scripts/run-docker.sh ./build-package.sh -a aarch64 proot-apk
+          # the build container can't write to the repo, so take the
+          # binaries out of the .deb it produced
+          deb=$(find output -name 'proot-apk_*_aarch64.deb' | head -1)
+          test -n "$deb" || { echo "no .deb produced"; find output -type f; exit 1; }
+          dpkg-deb -x "$deb" unpacked
           mkdir -p ../proot/out
-          cp libproot.so libproot_loader.so ../proot/out/
+          cp unpacked/data/data/com.termux/files/usr/bin/proot ../proot/out/libproot.so
+          cp unpacked/data/data/com.termux/files/usr/libexec/proot/loader ../proot/out/libproot_loader.so
       - name: verify static + 16KB page alignment
         run: |
           cd proot/out

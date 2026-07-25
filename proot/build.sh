@@ -21,7 +21,8 @@ termux_step_pre_configure() {
 	LDFLAGS+=" -static"
 }
 
-termux_step_post_make_install() {
-	cp "$TERMUX_PKG_SRCDIR/src/proot" /home/builder/termux-packages/libproot.so
-	cp "$TERMUX_PKG_SRCDIR/src/loader/loader" /home/builder/termux-packages/libproot_loader.so
-}
+# No post-install copying: the build container's repo dir is read-only.
+# The binaries ship inside the resulting .deb —
+#   usr/bin/proot            -> libproot.so
+#   usr/libexec/proot/loader -> libproot_loader.so
+# — which the CI job extracts on the host (see .github/workflows/ci.yml).
