@@ -1,4 +1,7 @@
 {
   "name": "sshd",
-  "description": "OpenSSH server on port 2222 (set a root password first: cellar exec <m> -- passwd)"
+  "description": "OpenSSH server on port 2222 (set a root password first)",
+  "category": "service",
+  "size": "~15 MB",
+  "verified": true
 }

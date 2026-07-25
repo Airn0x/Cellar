@@ -1,4 +1,7 @@
 {
   "name": "node",
-  "description": "Node.js + npm"
+  "description": "Node.js + npm",
+  "category": "runtime",
+  "size": "~200 MB",
+  "verified": true
 }

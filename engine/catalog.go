@@ -15,6 +15,16 @@ type StackMeta struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Distros     []string `json:"distros,omitempty"` // empty = any
+	Category    string   `json:"category,omitempty"`
+	Size        string   `json:"size,omitempty"` // plain-language footprint
+	// Verified means someone ran this stack on a real phone. UIs must
+	// separate verified stacks from the rest: a one-tap install that
+	// fails is worse than no button (docs/M3.md).
+	Verified bool   `json:"verified"`
+	NeedsKey string `json:"needs_key,omitempty"` // env var the stack requires
+	// Chat is a headless command taking a prompt as its final argument
+	// ("claude -p"); its presence makes a stack usable from the chat tab.
+	Chat string `json:"chat,omitempty"`
 }
 
 // catalogDir resolution order: $CELLAR_CATALOG, catalog/ next to the

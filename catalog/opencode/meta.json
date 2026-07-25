@@ -1,0 +1,10 @@
+{
+  "name": "opencode",
+  "description": "OpenCode — open-source terminal coding agent",
+  "distros": ["debian", "ubuntu"],
+  "category": "agent",
+  "size": "~180 MB (node)",
+  "verified": true,
+  "needs_key": "ANTHROPIC_API_KEY",
+  "chat": "opencode run"
+}

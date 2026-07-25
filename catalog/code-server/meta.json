@@ -1,0 +1,8 @@
+{
+  "name": "code-server",
+  "description": "VS Code in the browser, on port 8080",
+  "distros": ["debian", "ubuntu"],
+  "category": "service",
+  "size": "~350 MB",
+  "verified": true
+}

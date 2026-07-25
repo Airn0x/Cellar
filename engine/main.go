@@ -429,10 +429,23 @@ func cmdCatalog(args []string) {
 		return
 	}
 	for _, s := range stacks {
-		constraint := ""
-		if len(s.Distros) > 0 {
-			constraint = " (" + strings.Join(s.Distros, ", ") + ")"
+		notes := []string{}
+		if s.Size != "" {
+			notes = append(notes, s.Size)
 		}
-		fmt.Printf("%-14s %s%s\n", s.Name, s.Description, constraint)
+		if len(s.Distros) > 0 {
+			notes = append(notes, strings.Join(s.Distros, "/"))
+		}
+		if s.NeedsKey != "" {
+			notes = append(notes, "needs $"+s.NeedsKey)
+		}
+		if !s.Verified {
+			notes = append(notes, "UNVERIFIED on a phone")
+		}
+		suffix := ""
+		if len(notes) > 0 {
+			suffix = "  (" + strings.Join(notes, " · ") + ")"
+		}
+		fmt.Printf("%-14s %s%s\n", s.Name, s.Description, suffix)
 	}
 }

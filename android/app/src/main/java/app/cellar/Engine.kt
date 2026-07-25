@@ -38,6 +38,21 @@ class Engine(context: Context) {
         val broken: Boolean,
     )
 
+    /** A catalog stack, as the engine describes it. */
+    data class Stack(
+        val name: String,
+        val description: String,
+        val category: String,
+        val size: String,
+        val verified: Boolean,
+        val needsKey: String,
+        val chat: String,
+        val distros: List<String>,
+    ) {
+        val chatCapable: Boolean get() = chat.isNotEmpty()
+        fun runsOn(distro: String) = distros.isEmpty() || distro in distros
+    }
+
     private fun processBuilder(args: List<String>): ProcessBuilder {
         home.mkdirs(); tmp.mkdirs()
         val pb = ProcessBuilder(listOf(engineBin.absolutePath) + args).redirectErrorStream(true)
@@ -107,6 +122,50 @@ class Engine(context: Context) {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    suspend fun catalog(): List<Stack> {
+        val r = run("catalog", "--json")
+        if (!r.ok) return emptyList()
+        return try {
+            val arr = JSONArray(r.output.ifEmpty { "[]" })
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val d = o.optJSONArray("distros")
+                Stack(
+                    name = o.optString("name"),
+                    description = o.optString("description"),
+                    category = o.optString("category", "other"),
+                    size = o.optString("size"),
+                    verified = o.optBoolean("verified"),
+                    needsKey = o.optString("needs_key"),
+                    chat = o.optString("chat"),
+                    distros = if (d == null) emptyList() else (0 until d.length()).map { d.getString(it) },
+                )
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun apply(machine: String, stack: String, onLine: (String) -> Unit): Result =
+        stream("apply", machine, stack, onLine = onLine)
+
+    /**
+     * Runs a command inside a machine. Secrets arrive as `-e KEY=VALUE`
+     * and live only for this process — never written into the rootfs.
+     */
+    suspend fun exec(
+        machine: String,
+        argv: List<String>,
+        env: Map<String, String> = emptyMap(),
+        onLine: (String) -> Unit,
+    ): Result {
+        val args = mutableListOf("exec", machine)
+        env.forEach { (k, v) -> args += listOf("-e", "$k=$v") }
+        args += "--"
+        args += argv
+        return stream(*args.toTypedArray(), onLine = onLine)
     }
 
     suspend fun create(name: String, distro: String, onLine: (String) -> Unit): Result =

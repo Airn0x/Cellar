@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,10 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,8 +34,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,22 +41,17 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 
-// The cellar palette (matches cellar.parallex.in).
-private val Bg = Color(0xFF07090D)
-private val Panel = Color(0xFF0E1219)
-private val Line = Color(0xFF1B2230)
-private val Ink = Color(0xFFE9E5DA)
-private val Muted = Color(0xFF96A0B0)
-private val Dim = Color(0xFF7B8698)
-private val Amber = Color(0xFFFFB454)
-private val Green = Color(0xFF46D47E)
-private val Red = Color(0xFFFF6B6B)
-
 private val DISTROS = listOf(
-    Triple("alpine", "Alpine 3.24", "~4 MB · smallest"),
-    Triple("debian", "Debian trixie", "~90 MB · the agent default"),
-    Triple("ubuntu", "Ubuntu noble", "~90 MB · familiar"),
+    Triple("alpine", "Alpine 3.24", "~30 MB · smallest, musl"),
+    Triple("debian", "Debian trixie", "~400 MB · the agent default"),
+    Triple("ubuntu", "Ubuntu noble", "~400 MB · familiar"),
 )
+
+private const val TAB_MACHINES = "machines"
+private const val TAB_CATALOG = "catalog"
+private const val TAB_CHAT = "chat"
+private const val TAB_CONSOLE = "console"
+private const val TAB_SETUP = "setup"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,29 +65,29 @@ class MainActivity : ComponentActivity() {
                 .launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         val engine = Engine(this)
+        val vault = Vault(this)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = Bg, primary = Amber)) {
-                Home(engine, this)
+                App(engine, vault, this)
             }
         }
     }
 }
 
 @Composable
-private fun Home(engine: Engine, context: Context) {
+private fun App(engine: Engine, vault: Vault, context: Context) {
     val scope = rememberCoroutineScope()
+    var tab by remember { mutableStateOf(TAB_MACHINES) }
     var status by remember { mutableStateOf("probing engine…") }
     var machines by remember { mutableStateOf<List<Engine.Machine>>(emptyList()) }
+    var stacks by remember { mutableStateOf<List<Engine.Stack>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
-    // panel outlives `busy` on purpose: output the user asked for (logs,
-    // a create transcript) must not vanish the instant work finishes
-    var panel by remember { mutableStateOf<String?>(null) }
+    var panelLabel by remember { mutableStateOf<String?>(null) }
     val log = remember { mutableStateListOf<String>() }
-    var wizard by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<Engine.Machine?>(null) }
 
     suspend fun refresh() {
         machines = engine.list()
+        if (stacks.isEmpty()) stacks = engine.catalog()
     }
 
     LaunchedEffect(Unit) {
@@ -106,10 +95,12 @@ private fun Home(engine: Engine, context: Context) {
         refresh()
     }
 
+    // Every long job runs behind the foreground service, and its output
+    // stays on screen after it finishes until dismissed.
     fun work(label: String, block: suspend () -> Unit) {
         if (busy) return
         busy = true
-        panel = label
+        panelLabel = label
         log.clear()
         CellarService.start(context, label)
         scope.launch {
@@ -123,72 +114,72 @@ private fun Home(engine: Engine, context: Context) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).padding(20.dp)) {
-        Text("cellar", color = Ink, fontSize = 28.sp, fontFamily = FontFamily.Monospace)
-        Text(
-            "the server room in your cellphone",
-            color = Amber, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-        )
+    fun logLine(line: String) {
+        scope.launch { if (log.size > 400) log.removeRange(0, 200); log.add(line) }
+    }
+
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 18.dp, vertical = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("cellar", color = Ink, fontSize = 24.sp, fontFamily = FontFamily.Monospace)
+                Text(
+                    status,
+                    color = if (status.contains("ready")) Green else Amber,
+                    fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        TabBar(
+            listOf(TAB_MACHINES, TAB_CATALOG, TAB_CHAT, TAB_CONSOLE, TAB_SETUP),
+            tab,
+        ) { tab = it }
         Spacer(Modifier.height(16.dp))
-        Text(
-            "● $status",
-            color = if (status.contains("ready")) Green else Amber,
-            fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-        )
-        Spacer(Modifier.height(22.dp))
 
-        when {
-            panel != null -> WorkPanel(panel!!, log, busy) { panel = null }
+        if (panelLabel != null) {
+            WorkPanel(panelLabel!!, log, busy) { panelLabel = null }
+            return@Column
+        }
 
-            wizard -> CreateWizard(
-                onCancel = { wizard = false },
-                onPick = { distro ->
-                    wizard = false
+        when (tab) {
+            TAB_MACHINES -> MachinesTab(
+                machines = machines,
+                onCreate = { distro ->
                     val name = nextName(machines, distro)
-                    work("creating $name") {
-                        engine.create(name, distro) { line ->
-                            scope.launch { log.add(line) }
-                        }
-                    }
+                    work("creating $name") { engine.create(name, distro, ::logLine) }
                 },
-            )
-
-            selected != null -> MachineSheet(
-                machine = selected!!,
-                onBack = { selected = null },
                 onStart = { m ->
-                    selected = null
                     work("starting ${m.name}") {
-                        // a machine with no init yet gets a plain long-lived shell
                         val r = engine.start(m.name)
+                        // a machine that has never been started has no init
+                        // command yet; give it a long-lived idle one
                         if (!r.ok) engine.run("start", m.name, "--", "sleep infinity")
                     }
                 },
-                onStop = { m -> selected = null; work("stopping ${m.name}") { engine.stop(m.name) } },
-                onDelete = { m -> selected = null; work("removing ${m.name}") { engine.remove(m.name) } },
+                onStop = { m -> work("stopping ${m.name}") { engine.stop(m.name) } },
+                onRemove = { m -> work("removing ${m.name}") { engine.remove(m.name) } },
                 onLogs = { m ->
                     work("logs ${m.name}") {
-                        val text = engine.logs(m.name)
-                        scope.launch { text.lines().takeLast(60).forEach { log.add(it) } }
+                        engine.logs(m.name).lines().takeLast(80).forEach(::logLine)
                     }
                 },
             )
 
-            else -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("MACHINES", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Spacer(Modifier.weight(1f))
-                    Pill("+ new machine", Amber) { wizard = true }
-                }
-                Spacer(Modifier.height(10.dp))
-                if (machines.isEmpty()) {
-                    EmptyCard()
-                } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(machines) { m -> MachineCard(m) { selected = m } }
+            TAB_CATALOG -> CatalogTab(
+                stacks = stacks,
+                machines = machines,
+                onInstall = { stack, machine ->
+                    work("installing ${stack.name} → $machine") {
+                        engine.apply(machine, stack.name, ::logLine)
                     }
-                }
-            }
+                },
+            )
+
+            TAB_CHAT -> ChatTab(engine, vault, machines, stacks)
+
+            TAB_CONSOLE -> ConsoleTab(engine, machines)
+
+            TAB_SETUP -> SetupTab(engine, vault, context)
         }
     }
 }
@@ -203,148 +194,197 @@ private fun nextName(machines: List<Engine.Machine>, distro: String): String {
 }
 
 @Composable
-private fun EmptyCard() {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel)
-            .border(1.dp, Line, RoundedCornerShape(12.dp)).padding(16.dp),
-    ) {
-        Text("no machines yet", color = Muted, fontSize = 14.sp)
-        Spacer(Modifier.height(4.dp))
-        Text("tap “+ new machine” to unpack a Linux distro", color = Dim, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun MachineCard(m: Engine.Machine, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel)
-            .border(1.dp, Line, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(m.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                if (m.broken) "interrupted create" else "${m.distro} ${m.release}",
-                color = Muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-            )
-        }
-        val (label, tint) = when {
-            m.broken -> "broken" to Red
-            m.running -> "up:${m.pid}" to Green
-            else -> "stopped" to Muted
-        }
-        Text(label, color = tint, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    }
-}
-
-@Composable
-private fun CreateWizard(onCancel: () -> Unit, onPick: (String) -> Unit) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("PICK A DISTRO", color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            Spacer(Modifier.weight(1f))
-            Pill("cancel", Muted, onCancel)
-        }
-        Spacer(Modifier.height(10.dp))
-        DISTROS.forEach { (id, title, sub) ->
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 10.dp)
-                    .clip(RoundedCornerShape(12.dp)).background(Panel)
-                    .border(1.dp, Line, RoundedCornerShape(12.dp))
-                    .clickable { onPick(id) }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(title, color = Ink, fontSize = 15.sp)
-                    Text(sub, color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                }
-                Text("→", color = Amber, fontSize = 18.sp)
-            }
-        }
-        Text(
-            "downloads a verified rootfs over your current network",
-            color = Dim, fontSize = 11.sp,
-        )
-    }
-}
-
-@Composable
 private fun WorkPanel(label: String, log: List<String>, busy: Boolean, onDismiss: () -> Unit) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (busy) label else "$label · done",
                 color = if (busy) Amber else Green,
-                fontSize = 14.sp, fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp, fontFamily = FontFamily.Monospace,
             )
             Spacer(Modifier.weight(1f))
             if (!busy) Pill("close", Muted, onDismiss)
         }
         Spacer(Modifier.height(10.dp))
-        Column(
-            Modifier.fillMaxWidth().heightIn(min = 120.dp).clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF05070A)).border(1.dp, Line, RoundedCornerShape(12.dp))
-                .padding(14.dp).verticalScroll(rememberScrollState()),
-        ) {
-            if (log.isEmpty()) {
-                Text("working…", color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-            }
-            log.forEach {
-                Text(it, color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            }
-        }
+        OutputPane(
+            log, "working…",
+            Modifier.heightIn(min = 140.dp).verticalScroll(rememberScrollState()),
+        )
     }
 }
 
 @Composable
-private fun MachineSheet(
-    machine: Engine.Machine,
-    onBack: () -> Unit,
+private fun MachinesTab(
+    machines: List<Engine.Machine>,
+    onCreate: (String) -> Unit,
     onStart: (Engine.Machine) -> Unit,
     onStop: (Engine.Machine) -> Unit,
-    onDelete: (Engine.Machine) -> Unit,
+    onRemove: (Engine.Machine) -> Unit,
     onLogs: (Engine.Machine) -> Unit,
 ) {
-    Column {
+    var creating by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(machine.name, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            SectionTitle(if (creating) "PICK A DISTRO" else "MACHINES")
             Spacer(Modifier.weight(1f))
-            Pill("back", Muted, onBack)
+            if (creating) Pill("cancel", Muted) { creating = false }
+            else Pill("+ new machine", Amber) { creating = true }
         }
-        Text(
-            if (machine.broken) "interrupted create — remove to clean up"
-            else "${machine.distro} ${machine.release}",
-            color = Muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-        )
-        Spacer(Modifier.height(18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (!machine.broken) {
-                if (machine.running) Pill("stop", Amber) { onStop(machine) }
-                else Pill("start", Green) { onStart(machine) }
-                Pill("logs", Muted) { onLogs(machine) }
+        Spacer(Modifier.height(10.dp))
+
+        if (creating) {
+            DISTROS.forEach { (id, title, sub) ->
+                Card(Modifier.padding(bottom = 10.dp).clickable {
+                    creating = false
+                    onCreate(id)
+                }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(title, color = Ink, fontSize = 15.sp)
+                            Text(sub, color = Dim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Text("→", color = Amber, fontSize = 18.sp)
+                    }
+                }
             }
-            Pill("remove", Red) { onDelete(machine) }
+            Text(
+                "downloads a verified rootfs over your current network",
+                color = Dim, fontSize = 11.sp,
+            )
+            return@Column
         }
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "a terminal lands in the next build; today the CLI in a Termux " +
-                "session drives the same machines",
-            color = Dim, fontSize = 11.sp,
-        )
+
+        if (machines.isEmpty()) {
+            Card {
+                Text("no machines yet", color = Muted, fontSize = 14.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "tap “+ new machine”, or open the catalog and pick something to run",
+                    color = Dim, fontSize = 12.sp,
+                )
+            }
+            return@Column
+        }
+
+        machines.forEach { m ->
+            Card(Modifier.padding(bottom = 10.dp).clickable {
+                open = if (open == m.name) null else m.name
+            }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(m.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (m.broken) "interrupted create" else "${m.distro} ${m.release}",
+                            color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    val (label, tint) = when {
+                        m.broken -> "broken" to Red
+                        m.running -> "up:${m.pid}" to Green
+                        else -> "stopped" to Muted
+                    }
+                    Text(label, color = tint, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
+                if (open == m.name) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!m.broken) {
+                            if (m.running) Pill("stop", Amber) { onStop(m) }
+                            else Pill("start", Green) { onStart(m) }
+                            Pill("logs", Muted) { onLogs(m) }
+                        }
+                        Pill("remove", Red) { onRemove(m) }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun Pill(label: String, tint: Color, onClick: () -> Unit) {
-    Text(
-        label,
-        color = tint,
-        fontSize = 12.sp,
-        fontFamily = FontFamily.Monospace,
-        modifier = Modifier.clip(RoundedCornerShape(8.dp))
-            .border(1.dp, tint.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-    )
+private fun CatalogTab(
+    stacks: List<Engine.Stack>,
+    machines: List<Engine.Machine>,
+    onInstall: (Engine.Stack, String) -> Unit,
+) {
+    var open by remember { mutableStateOf<String?>(null) }
+    val verified = stacks.filter { it.verified }
+    val unverified = stacks.filterNot { it.verified }
+
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        SectionTitle("ONE-TAP STACKS")
+        Spacer(Modifier.height(10.dp))
+
+        if (machines.isEmpty()) {
+            Card {
+                Text("create a machine first", color = Muted, fontSize = 14.sp)
+                Spacer(Modifier.height(4.dp))
+                Text("stacks install into a machine — make one on the machines tab", color = Dim, fontSize = 12.sp)
+            }
+            return@Column
+        }
+
+        verified.forEach { s ->
+            StackCard(s, machines, open == s.name, { open = if (open == s.name) null else s.name }, onInstall)
+        }
+
+        if (unverified.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            SectionTitle("NOT YET VERIFIED ON A PHONE")
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "these should work, but nobody has run them on a real device yet",
+                color = Dim, fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            unverified.forEach { s ->
+                StackCard(s, machines, open == s.name, { open = if (open == s.name) null else s.name }, onInstall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StackCard(
+    s: Engine.Stack,
+    machines: List<Engine.Machine>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onInstall: (Engine.Stack, String) -> Unit,
+) {
+    Card(Modifier.padding(bottom = 10.dp).clickable(onClick = onToggle)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(s.name, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(s.description, color = Muted, fontSize = 12.sp)
+                val notes = listOfNotNull(
+                    s.category.takeIf { it.isNotEmpty() },
+                    s.size.takeIf { it.isNotEmpty() },
+                    s.needsKey.takeIf { it.isNotEmpty() }?.let { "needs $it" },
+                ).joinToString(" · ")
+                if (notes.isNotEmpty()) {
+                    Text(notes, color = Dim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+            Text(if (s.verified) "✓" else "?", color = if (s.verified) Green else Amber, fontSize = 14.sp)
+        }
+        if (expanded) {
+            Spacer(Modifier.height(12.dp))
+            val usable = machines.filter { !it.broken && s.runsOn(it.distro) }
+            if (usable.isEmpty()) {
+                Text(
+                    "needs a ${s.distros.joinToString("/")} machine — create one first",
+                    color = Amber, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                )
+            } else {
+                Text("install into:", color = Dim, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    usable.forEach { m -> Pill(m.name, Green) { onInstall(s, m.name) } }
+                }
+            }
+        }
+    }
 }

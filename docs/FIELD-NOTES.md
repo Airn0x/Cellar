@@ -89,7 +89,29 @@ with no rootfs path in it. **Parentage is the only reliable signal** — walk `/
 Measured A/B on the escalation path: without the descendant kill, one orphan survives;
 with it, zero.
 
-## 9. `os.Exit` skips your deferred cleanup
+## 9. The hardlink ban reaches *inside* the machine too
+
+Extraction isn't the only thing that hardlinks. Modern package managers link from a
+local cache to save space — `uv` does it by default — so installing Aider inside a
+machine dies with `Operation not permitted` on `link()`, the same SELinux rule as field
+note 3, one layer deeper.
+
+Worse, the *second* attempt fails differently: proot's `--link2symlink` leaves
+`.l2s.*` files and symlink chains behind, and reads through a half-populated cache then
+fail with `ELOOP: Too many levels of symbolic links`.
+
+**Fix:** tell the tool to copy (`UV_LINK_MODE=copy`) **and** clear any cache a failed
+hardlink run poisoned. Both live in the catalog stack, so a user never meets either error.
+
+## 10. Installers assume a TTY that machine commands don't have
+
+Vendor install scripts often end with an interactive configurator. Goose's does, and it
+died on `/dev/tty: No such device or address` — `cellar exec` has stdio, not a terminal.
+Most such scripts have an opt-out (`CONFIGURE=false` here); the trap is *where* the
+variable goes: `VAR=false curl … | bash` sets it for `curl`, not for the shell that
+actually runs the installer. It belongs on the right-hand side: `curl … | VAR=false bash`.
+
+## 11. `os.Exit` skips your deferred cleanup
 
 Not Android's fault, but found here: an error-path `die()` (which calls `os.Exit`)
 means `defer`red cleanup never runs, leaving half-created machines on disk.

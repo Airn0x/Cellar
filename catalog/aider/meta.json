@@ -1,0 +1,9 @@
+{
+  "name": "aider",
+  "description": "Aider — AI pair programming in your git repo",
+  "category": "agent",
+  "size": "~200 MB (python + deps)",
+  "verified": true,
+  "needs_key": "ANTHROPIC_API_KEY",
+  "chat": "aider --no-git --yes --message"
+}
