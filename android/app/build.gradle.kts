@@ -19,11 +19,13 @@ android {
         applicationId = "in.parallex.cellar"
         minSdk = 29
         targetSdk = 35
-        // monotonic from the version: 0.4.0 -> 400
+        // monotonic from the version: 0.4.0 -> 400. Must stay >= 1:
+        // the 0.0.0-dev fallback would otherwise compute 0, which the
+        // Android plugin rejects outright.
         versionCode = cellarVersion.removeSuffix("-dev").split(".").let {
             val p = it.mapNotNull { s -> s.toIntOrNull() }
             if (p.size >= 3) p[0] * 10000 + p[1] * 100 + p[2] else 1
-        }
+        }.coerceAtLeast(1)
         versionName = cellarVersion
         ndk { abiFilters += "arm64-v8a" }
     }
