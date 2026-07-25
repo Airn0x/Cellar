@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -204,72 +203,24 @@ func fileMatchesSum(path, want string) (bool, error) {
 	return hex.EncodeToString(h.Sum(nil)) == want, nil
 }
 
-// extract unpacks a rootfs tarball. Runs the system tar (rather than
-// archive/tar) so xz/gz detection and long names are its problem;
-// device nodes are excluded because mknod is impossible without root
-// and proot binds the real /dev anyway. When proot is available, tar
-// runs under it: Android denies hard links in app data, and proot's
-// --link2symlink converts link() into symlinks (rootfs tarballs are
-// full of hardlinks — Debian's perl alone has several). This is
-// proot-distro's proven extraction recipe.
+// extract unpacks a rootfs tarball with the engine's own tar/xz/gzip
+// code (extract.go): no external tar exists inside an Android app, and
+// pure-Go extraction sidesteps the hardlink ban (copies) and suid-mode
+// traps (normalization) in one move — see docs/FIELD-NOTES.md #3–4.
 func extract(tarball, dest string) error {
-	if err := os.MkdirAll(dest, 0o700); err != nil {
+	if err := extractTar(tarball, dest); err != nil {
 		return err
-	}
-	tarArgs := []string{
-		// --anchored: exclude only the top-level dev/, not any deeper
-		// directory that happens to be called dev (node_modules has them)
-		"--anchored", "--exclude=dev/*", "--exclude=./dev/*",
-		"--warning=no-unknown-keyword",
-		"-xf", tarball, "-C", dest,
-	}
-	var cmd *exec.Cmd
-	if proot, err := findProot(); err == nil {
-		cmd = exec.Command(proot, append([]string{"--link2symlink", "-0", "tar"}, tarArgs...)...)
-		if t := os.Getenv("TMPDIR"); t != "" {
-			cmd.Env = append(os.Environ(), "PROOT_TMP_DIR="+t)
-		}
-	} else {
-		cmd = exec.Command("tar", tarArgs...) // plain Linux dev box
-	}
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("tar extract: %w", err)
 	}
 	return finishRootfs(dest)
 }
 
 // finishRootfs makes a freshly extracted rootfs usable under proot.
+// (Owner-access normalization happens during extraction itself now.)
 func finishRootfs(root string) error {
 	for _, d := range []string{"dev", "proc", "sys", "tmp", "run", "root", "etc"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			return err
 		}
-	}
-	// Normalize owner access: suid-style modes like 4711 (e.g. Alpine's
-	// bbsuid) leave files we own unreadable, which breaks export and rm.
-	// suid grants nothing under proot, so owner rw costs nothing.
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.Type()&os.ModeSymlink != 0 {
-			return nil // unreadable entry or symlink: chmod would follow the link; skip
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		perm := info.Mode().Perm()
-		want := perm | 0o600
-		if d.IsDir() {
-			want = perm | 0o700
-		}
-		if want != perm {
-			os.Chmod(path, want)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 	// resolv.conf is often a broken symlink to systemd-resolved; replace
 	// it. CELLAR_DNS (same override the engine itself honors) goes first.

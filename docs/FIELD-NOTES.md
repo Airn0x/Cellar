@@ -30,9 +30,10 @@ SELinux denies `link()` for app-private storage. Distro rootfs tarballs are full
 hardlinks (Debian's `/usr/bin/perl5.40.1` → `perl`), so plain `tar -x` fails with
 `Cannot hard link ... Permission denied`.
 
-**Fix:** run the extraction itself under `proot --link2symlink -0`, which rewrites
-`link()` into symlinks. This is proot-distro's own recipe; the engine uses it whenever
-proot is present.
+**Fix:** first shipped as running the extraction under `proot --link2symlink -0`
+(proot-distro's own recipe). Engine v0.2 moved extraction into the binary itself
+(pure-Go tar/xz, hardlinks materialized as copies) — an APK has no `tar`, so this had
+to happen anyway, and it removes proot from the extract path as a bonus.
 
 ## 4. suid file modes break your own tooling
 

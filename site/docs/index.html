@@ -61,10 +61,10 @@
 <span class="p">$</span> git clone https://github.com/Airn0x/Cellar   <span class="c"># opens with the beta</span>
 <span class="p">$</span> cd Cellar/engine
 <span class="p">$</span> go build -o cellar . && export PATH="$PATH:$PWD"</pre>
-    <p>That's the whole toolchain. The engine has zero dependencies outside the Go
-      standard library; the binary weighs ~6&nbsp;MB and also runs on a regular Linux box
-      for development — machines still need <code>proot</code> there; only the image
-      extraction step has a plain-<code>tar</code> fallback.</p>
+    <p>That's the whole toolchain. The engine's only dependency beyond the Go standard
+      library is a tiny pure-Go xz decoder — the ~6&nbsp;MB binary carries its own
+      tar/xz extraction, so the single external tool it ever needs is
+      <code>proot</code>, on a phone or on a Linux dev box alike.</p>
 
     <h2 id="first">Your first machine</h2>
     <pre><span class="p">$</span> cellar create dev --distro debian

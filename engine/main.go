@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -390,14 +389,9 @@ func cmdExport(args []string) {
 	if dest == "" {
 		dest = fmt.Sprintf("%s-%s.tar.gz", name, time.Now().Format("20060102"))
 	}
-	// pre-create 0600 (tar truncates but keeps the mode): the archive is
-	// a full machine image — home dirs, host keys, whatever agents left
-	if f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-		f.Close()
-	}
-	cmd := exec.Command("tar", "-czf", dest, "-C", machineDir(name), "rootfs", "meta.json")
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	if err := cmd.Run(); err != nil {
+	// 0600 archive (exportMachine creates it so): a machine image is
+	// home dirs, host keys, whatever agents left behind
+	if err := exportMachine(name, dest); err != nil {
 		die(fmt.Errorf("export: %w", err))
 	}
 	fmt.Printf("exported %q to %s\n", name, dest)

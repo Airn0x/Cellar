@@ -1,8 +1,11 @@
 # build outputs
 /engine/cellar
 /engine/dist/
-/app/build/
-/app/.gradle/
+/android/.gradle/
+/android/app/build/
+/android/app/src/main/jniLibs/
+/android/build/
+/android/local.properties
 *.apk
 *.aab
 

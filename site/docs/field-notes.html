@@ -75,9 +75,11 @@
       tarballs are full of hardlinks (Debian's <code>/usr/bin/perl5.40.1</code> →
       <code>perl</code>). Plain <code>tar&nbsp;-x</code> fails with
       <code>Cannot hard link … Permission denied</code>.</p>
-    <p><strong>Fix:</strong> run the extraction itself under
-      <code>proot --link2symlink -0</code>, which rewrites <code>link()</code> into
-      symlinks — proot-distro's own battle-tested recipe.</p>
+    <p><strong>Fix:</strong> first, run the extraction under
+      <code>proot --link2symlink -0</code> (proot-distro's battle-tested recipe). Since
+      engine v0.2, extraction is built into the binary itself — hardlink entries become
+      plain copies — so neither <code>tar</code> nor proot is involved in extraction at
+      all, which an APK requires anyway (there's no tar inside an app sandbox).</p>
 
     <h2 id="suid">4 · suid file modes break your own tooling</h2>
     <p>Alpine ships <code>/bin/bbsuid</code> as mode <code>4711</code> — setuid,
