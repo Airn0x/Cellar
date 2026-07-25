@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -35,7 +37,8 @@ usage:
 environment:
   CELLAR_HOME     state dir (default ~/.cellar)
   CELLAR_PROOT    proot binary (default: found in PATH)
-  CELLAR_CATALOG  catalog dir (default: catalog/ next to the binary, then $CELLAR_HOME/catalog)
+  CELLAR_CATALOG  catalog dir (default: ../catalog relative to the binary — the repo
+                  layout — then $CELLAR_HOME/catalog)
 `
 
 func die(err error) {
@@ -130,23 +133,43 @@ func cmdCreate(args []string) {
 	if err := validName(name); err != nil {
 		die(err)
 	}
-	if machineExists(name) {
-		die(fmt.Errorf("machine %q already exists", name))
+	if machineDirExists(name) { // covers half-created dirs too, not just healthy machines
+		die(fmt.Errorf("machine %q already exists (clean up leftovers with: cellar rm %s --force)", name, name))
 	}
 
 	img, err := resolveImage(*distro, *release)
 	if err != nil {
 		die(err)
 	}
-	tarball, err := download(img)
-	if err != nil {
+
+	// Reserve the machine dir atomically (Mkdir, not MkdirAll) so two
+	// concurrent creates of the same name can't interleave extractions.
+	if err := os.MkdirAll(machinesDir(), 0o700); err != nil {
 		die(err)
 	}
+	if err := os.Mkdir(machineDir(name), 0o700); err != nil {
+		die(fmt.Errorf("machine %q is already being created: %w", name, err))
+	}
+	// Clean up on Ctrl-C/TERM: die() exits without running defers, and an
+	// interrupted extract would otherwise leave an invisible half-machine.
+	// (SIGKILL can't be caught; `cellar rm --force` handles that leftover.)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		fmt.Fprintln(os.Stderr, "\ncellar: interrupted — removing half-created machine")
+		removeMachineDir(name)
+		os.Exit(130)
+	}()
 
-	// no defer for cleanup: die() exits, and deferred funcs don't run
+	tarball, err := download(img)
+	if err != nil {
+		removeMachineDir(name)
+		die(err)
+	}
 	fmt.Fprintf(os.Stderr, "extracting ...\n")
 	if err := extract(tarball, rootfsDir(name)); err != nil {
-		removeMachineDir(name) // don't leave half-created machines around
+		removeMachineDir(name)
 		die(err)
 	}
 	meta := &Meta{
@@ -157,6 +180,7 @@ func cmdCreate(args []string) {
 		removeMachineDir(name)
 		die(err)
 	}
+	signal.Stop(sig)
 
 	if *asJSON {
 		json.NewEncoder(os.Stdout).Encode(map[string]string{
@@ -175,20 +199,25 @@ type lsRow struct {
 	Created string `json:"created"`
 	Running bool   `json:"running"`
 	Pid     int    `json:"pid,omitempty"`
+	Broken  bool   `json:"broken,omitempty"` // dir without meta.json (interrupted create)
 }
 
 func cmdLs(args []string) {
 	fs := flag.NewFlagSet("ls", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "list as JSON")
 	fs.Parse(args)
-	metas, err := listMachines()
+	metas, brokenNames, err := listMachines()
 	if err != nil {
 		die(err)
 	}
-	rows := make([]lsRow, 0, len(metas))
+	rows := make([]lsRow, 0, len(metas)+len(brokenNames))
 	for _, m := range metas {
 		pid := runningPid(m.Name)
-		rows = append(rows, lsRow{m.Name, m.Distro, m.Release, m.Created, pid != 0, pid})
+		rows = append(rows, lsRow{Name: m.Name, Distro: m.Distro, Release: m.Release,
+			Created: m.Created, Running: pid != 0, Pid: pid})
+	}
+	for _, n := range brokenNames {
+		rows = append(rows, lsRow{Name: n, Distro: "?", Release: "?", Broken: true})
 	}
 	if *asJSON {
 		json.NewEncoder(os.Stdout).Encode(rows)
@@ -201,7 +230,10 @@ func cmdLs(args []string) {
 	fmt.Printf("%-16s %-8s %-8s %-8s %s\n", "NAME", "DISTRO", "RELEASE", "STATE", "CREATED")
 	for _, r := range rows {
 		state := "stopped"
-		if r.Running {
+		switch {
+		case r.Broken:
+			state = "broken" // clean up with: cellar rm <name> --force
+		case r.Running:
 			state = fmt.Sprintf("up:%d", r.Pid)
 		}
 		fmt.Printf("%-16s %-8s %-8s %-8s %s\n", r.Name, r.Distro, r.Release, state, r.Created)
@@ -269,7 +301,9 @@ func cmdStart(args []string) {
 	}
 	initCmd := meta.Init
 	if len(cmdPart) > 0 {
-		initCmd = strings.Join(cmdPart, " ")
+		// same semantics as exec: one arg = shell syntax as-is, several
+		// args = quoted so they survive sh -c (and persistence) verbatim
+		initCmd = shellCommand(cmdPart)
 	}
 	if initCmd == "" {
 		die(fmt.Errorf("machine %q has no init command — start it once with: cellar start %s -- <command>", name, name))
@@ -318,7 +352,14 @@ func cmdRm(args []string) {
 	if name == "" || fs.NArg() != 0 {
 		die(fmt.Errorf("usage: cellar rm <name> [--force]"))
 	}
-	mustMachine(name)
+	if err := validName(name); err != nil {
+		die(err)
+	}
+	// dir-existence, not meta-existence: rm must be able to clean up
+	// half-created machines that have no meta.json
+	if !machineDirExists(name) {
+		die(fmt.Errorf("no machine %q (see: cellar ls)", name))
+	}
 	if pid := runningPid(name); pid != 0 {
 		if !*force {
 			die(fmt.Errorf("machine %q is running (pid %d) — stop it or use --force", name, pid))
@@ -348,6 +389,11 @@ func cmdExport(args []string) {
 	dest := *out
 	if dest == "" {
 		dest = fmt.Sprintf("%s-%s.tar.gz", name, time.Now().Format("20060102"))
+	}
+	// pre-create 0600 (tar truncates but keeps the mode): the archive is
+	// a full machine image — home dirs, host keys, whatever agents left
+	if f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		f.Close()
 	}
 	cmd := exec.Command("tar", "-czf", dest, "-C", machineDir(name), "rootfs", "meta.json")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr

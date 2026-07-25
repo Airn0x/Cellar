@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,14 +34,18 @@ func catalogDir() string {
 
 func loadStack(stack string) (*StackMeta, string, error) {
 	dir := filepath.Join(catalogDir(), stack)
+	if _, err := os.Stat(dir); err != nil {
+		return nil, "", fmt.Errorf("no stack %q in catalog %s", stack, catalogDir())
+	}
 	b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
 	if err != nil {
-		return nil, "", fmt.Errorf("no stack %q in catalog %s", stack, catalogDir())
+		return nil, "", fmt.Errorf("stack %q has no readable meta.json (%w)", stack, err)
 	}
 	var m StackMeta
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, "", fmt.Errorf("corrupt meta for stack %q: %w", stack, err)
 	}
+	m.Name = stack // the directory name is the identity; never trust the file's
 	script := filepath.Join(dir, "apply.sh")
 	if _, err := os.Stat(script); err != nil {
 		return nil, "", fmt.Errorf("stack %q has no apply.sh", stack)
@@ -56,7 +61,7 @@ func listStacks() ([]*StackMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []*StackMeta
+	out := []*StackMeta{} // non-nil: `catalog --json` must print [], not null
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -94,11 +99,22 @@ func applyStack(machine, stack string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	guestPath := filepath.Join(rootfsDir(machine), "tmp", ".cellar-apply.sh")
-	if err := os.WriteFile(guestPath, b, 0o700); err != nil {
+	// pid-unique name (concurrent applies must not clobber each other's
+	// script) and remove-then-O_EXCL (never write through a symlink the
+	// guest may have planted at a predictable path in its /tmp).
+	scriptName := fmt.Sprintf(".cellar-apply-%d.sh", os.Getpid())
+	guestPath := filepath.Join(rootfsDir(machine), "tmp", scriptName)
+	os.Remove(guestPath)
+	f, err := os.OpenFile(guestPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
 		return 1, err
+	}
+	_, werr := f.Write(b)
+	if cerr := f.Close(); werr != nil || cerr != nil {
+		os.Remove(guestPath)
+		return 1, errors.Join(werr, cerr)
 	}
 	defer os.Remove(guestPath)
 	fmt.Fprintf(os.Stderr, "applying %s to %s ...\n", stack, machine)
-	return runRaw(machine, []string{"/bin/sh", "/tmp/.cellar-apply.sh"}, nil)
+	return runRaw(machine, []string{"/bin/sh", "/tmp/" + scriptName}, nil)
 }

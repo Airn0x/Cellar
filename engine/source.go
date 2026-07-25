@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +45,15 @@ func hostArch() (string, error) {
 }
 
 var indexClient = &http.Client{Timeout: 30 * time.Second}
+
+// downloadClient has no overall timeout (rootfs downloads are minutes on
+// slow links) but won't hang forever waiting for a server to respond.
+var downloadClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: 30 * time.Second,
+	},
+}
 
 // buildDirRe matches dated build dirs like href="20260724_05%3A24/".
 var buildDirRe = regexp.MustCompile(`href="(2\d{7}_\d{2}(?:%3A|:)\d{2})/"`)
@@ -146,7 +156,7 @@ func download(img *image) (string, error) {
 	}
 
 	fmt.Fprintf(os.Stderr, "downloading %s %s (%s) ...\n", img.distro, img.release, decoded)
-	resp, err := (&http.Client{}).Get(img.rootfsURL)
+	resp, err := downloadClient.Get(img.rootfsURL)
 	if err != nil {
 		return "", err
 	}
@@ -155,7 +165,9 @@ func download(img *image) (string, error) {
 		return "", fmt.Errorf("GET %s: %s", img.rootfsURL, resp.Status)
 	}
 
-	tmp := local + ".part"
+	// pid-unique .part: concurrent creates must not interleave writes
+	// into one temp file (each verifies its own stream, then renames)
+	tmp := fmt.Sprintf("%s.part.%d", local, os.Getpid())
 	f, err := os.Create(tmp)
 	if err != nil {
 		return "", err
@@ -165,7 +177,7 @@ func download(img *image) (string, error) {
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
 		os.Remove(tmp)
-		return "", fmt.Errorf("download failed after %d bytes: %v", n, cmpErr(err, closeErr))
+		return "", fmt.Errorf("download failed after %d bytes: %v", n, errors.Join(err, closeErr))
 	}
 	got := hex.EncodeToString(h.Sum(nil))
 	if got != img.sha256 {
@@ -177,13 +189,6 @@ func download(img *image) (string, error) {
 	}
 	fmt.Fprintf(os.Stderr, "downloaded %.1f MB, sha256 ok\n", float64(n)/1e6)
 	return local, nil
-}
-
-func cmpErr(a, b error) error {
-	if a != nil {
-		return a
-	}
-	return b
 }
 
 func fileMatchesSum(path, want string) (bool, error) {
@@ -212,7 +217,9 @@ func extract(tarball, dest string) error {
 		return err
 	}
 	tarArgs := []string{
-		"--exclude=dev/*", "--exclude=./dev/*",
+		// --anchored: exclude only the top-level dev/, not any deeper
+		// directory that happens to be called dev (node_modules has them)
+		"--anchored", "--exclude=dev/*", "--exclude=./dev/*",
 		"--warning=no-unknown-keyword",
 		"-xf", tarball, "-C", dest,
 	}
@@ -264,14 +271,25 @@ func finishRootfs(root string) error {
 	if err != nil {
 		return err
 	}
-	// resolv.conf is often a broken symlink to systemd-resolved; replace it.
+	// resolv.conf is often a broken symlink to systemd-resolved; replace
+	// it. CELLAR_DNS (same override the engine itself honors) goes first.
 	rc := filepath.Join(root, "etc", "resolv.conf")
 	os.Remove(rc)
-	if err := os.WriteFile(rc, []byte("nameserver 1.1.1.1\nnameserver 8.8.8.8\n"), 0o644); err != nil {
+	resolv := ""
+	if s := os.Getenv("CELLAR_DNS"); s != "" {
+		resolv = "nameserver " + s + "\n"
+	}
+	resolv += "nameserver 1.1.1.1\nnameserver 8.8.8.8\n"
+	if err := os.WriteFile(rc, []byte(resolv), 0o644); err != nil {
 		return err
 	}
+	// never write through a tarball-supplied symlink (Lstat, not Stat:
+	// a dangling link reads as "missing" to Stat and would be followed)
 	hosts := filepath.Join(root, "etc", "hosts")
-	if _, err := os.Stat(hosts); os.IsNotExist(err) {
+	if fi, err := os.Lstat(hosts); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		os.Remove(hosts)
+	}
+	if _, err := os.Lstat(hosts); os.IsNotExist(err) {
 		if err := os.WriteFile(hosts, []byte("127.0.0.1 localhost\n"), 0o644); err != nil {
 			return err
 		}

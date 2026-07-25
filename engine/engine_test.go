@@ -7,12 +7,14 @@ import (
 	"testing"
 )
 
+// deliberately NOT in ascending order: latestBuild must select the max,
+// not the last row the server happened to emit
 const indexFixture = `<head><title>Index of /images/debian/trixie/arm64/default/</title></head>
 <body>
 <h1>Index of /images/debian/trixie/arm64/default/</h1><hr><pre><a href="../">../</a>
 <a href="20260722_18%3A21/">20260722_18:21/</a>                                    22-Jul-2026 20:46                   -
-<a href="20260723_05%3A24/">20260723_05:24/</a>                                    23-Jul-2026 07:19                   -
 <a href="20260724_05%3A24/">20260724_05:24/</a>                                    24-Jul-2026 07:17                   -
+<a href="20260723_05%3A24/">20260723_05:24/</a>                                    23-Jul-2026 07:19                   -
 </pre><hr></body>
 </html>`
 
@@ -78,9 +80,32 @@ func TestMetaRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(m, got) {
 		t.Fatalf("round trip mismatch: %+v != %+v", got, m)
 	}
-	all, err := listMachines()
+	// a dir without meta.json (interrupted create) must list as broken,
+	// not vanish — rm relies on seeing it
+	if err := os.MkdirAll(machineDir("half"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	all, broken, err := listMachines()
 	if err != nil || len(all) != 1 || all[0].Name != "dev" {
 		t.Fatalf("listMachines = %v, %v", all, err)
+	}
+	if !reflect.DeepEqual(broken, []string{"half"}) {
+		t.Fatalf("broken = %v, want [half]", broken)
+	}
+}
+
+func TestLoadMetaNameAuthority(t *testing.T) {
+	t.Setenv("CELLAR_HOME", t.TempDir())
+	if err := os.MkdirAll(machineDir("real"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// meta.json claiming another name must not win over the dir name
+	if err := os.WriteFile(metaPath("real"), []byte(`{"name":"impostor","distro":"alpine"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := loadMeta("real")
+	if err != nil || m.Name != "real" {
+		t.Fatalf("loadMeta name = %q (%v), want real", m.Name, err)
 	}
 }
 
@@ -123,6 +148,30 @@ func TestPopName(t *testing.T) {
 	}
 	if name, _ := popName([]string{"--json"}); name != "" {
 		t.Fatalf("popName flags-only: %q", name)
+	}
+}
+
+func TestShellCommand(t *testing.T) {
+	if got := shellCommand([]string{"echo $HOME && date"}); got != "echo $HOME && date" {
+		t.Fatalf("single arg must pass through raw, got %q", got)
+	}
+	if got := shellCommand([]string{"printf", "%s", "a b"}); got != `'printf' '%s' 'a b'` {
+		t.Fatalf("multi arg must be quoted, got %q", got)
+	}
+}
+
+func TestDNSServers(t *testing.T) {
+	t.Setenv("CELLAR_DNS", "")
+	if got := dnsServers(); len(got) != 2 || got[0] != "1.1.1.1:53" {
+		t.Fatalf("default servers = %v", got)
+	}
+	t.Setenv("CELLAR_DNS", "9.9.9.9")
+	if got := dnsServers(); !reflect.DeepEqual(got, []string{"9.9.9.9:53"}) {
+		t.Fatalf("bare host = %v", got)
+	}
+	t.Setenv("CELLAR_DNS", "9.9.9.9:5353")
+	if got := dnsServers(); !reflect.DeepEqual(got, []string{"9.9.9.9:5353"}) {
+		t.Fatalf("host:port = %v", got)
 	}
 }
 

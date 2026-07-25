@@ -52,6 +52,13 @@ func machineExists(name string) bool {
 	return err == nil
 }
 
+// machineDirExists reports whether the machine's directory is occupied at
+// all — including half-created machines that never got a meta.json.
+func machineDirExists(name string) bool {
+	_, err := os.Stat(machineDir(name))
+	return err == nil
+}
+
 // removeMachineDir deletes a machine directory, first restoring owner
 // rwx on directories: a partially extracted rootfs can contain
 // read-only dirs that plain RemoveAll cannot descend into.
@@ -77,6 +84,7 @@ func loadMeta(name string) (*Meta, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, fmt.Errorf("corrupt meta for %q: %w", name, err)
 	}
+	m.Name = name // the directory name is the identity; never trust the file's
 	return &m, nil
 }
 
@@ -88,25 +96,31 @@ func saveMeta(m *Meta) error {
 	return os.WriteFile(metaPath(m.Name), append(b, '\n'), 0o600)
 }
 
-func listMachines() ([]*Meta, error) {
+// listMachines returns healthy machines plus the names of broken ones
+// (dirs without a readable meta.json — e.g. a create that was killed).
+// Broken machines must stay visible so `cellar rm` can clean them up.
+func listMachines() ([]*Meta, []string, error) {
 	entries, err := os.ReadDir(machinesDir())
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []*Meta
+	var broken []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		m, err := loadMeta(e.Name())
 		if err != nil {
-			continue // half-created or foreign dir; skip rather than fail ls
+			broken = append(broken, e.Name())
+			continue
 		}
 		out = append(out, m)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	sort.Strings(broken)
+	return out, broken, nil
 }

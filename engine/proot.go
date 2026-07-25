@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -78,30 +79,21 @@ func shQuote(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// runInMachine runs argv inside the machine with stdio attached and
-// returns its exit code.
-func runInMachine(name string, argv []string, extraEnv []string) (int, error) {
-	proot, err := findProot()
-	if err != nil {
-		return 1, err
-	}
-	// -c (not -lc): exec output must stay clean for pipes/agents;
-	// profile noise belongs to interactive shells only.
-	guestCmd := []string{"/bin/sh", "-c", shQuote(argv)}
+// shellCommand turns a user argv into one shell command string: a single
+// argument is taken as-is (shell syntax allowed), multiple arguments are
+// quoted so they survive the sh -c round trip verbatim.
+func shellCommand(argv []string) string {
 	if len(argv) == 1 {
-		guestCmd = []string{"/bin/sh", "-c", argv[0]} // allow shell syntax in single-string form
+		return argv[0]
 	}
-	cmd := exec.Command(proot, prootArgs(rootfsDir(name), guestCmd)...)
-	cmd.Env = guestEnv(extraEnv)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err = cmd.Run()
-	if exit, ok := err.(*exec.ExitError); ok {
-		return exit.ExitCode(), nil
-	}
-	if err != nil {
-		return 1, err
-	}
-	return 0, nil
+	return shQuote(argv)
+}
+
+// runInMachine runs argv inside the machine with stdio attached and
+// returns its exit code. -c (not -lc): exec output must stay clean for
+// pipes/agents; profile noise belongs to interactive shells only.
+func runInMachine(name string, argv []string, extraEnv []string) (int, error) {
+	return runRaw(name, []string{"/bin/sh", "-c", shellCommand(argv)}, extraEnv)
 }
 
 // runRaw runs an exact guest argv (no sh -c wrapping) with stdio attached.
@@ -124,7 +116,9 @@ func runRaw(name string, guestCmd []string, extraEnv []string) (int, error) {
 }
 
 // startDetached launches the machine's init command in its own session,
-// logging to logs/init.log, and records the proot pid.
+// logging to logs/init.log, and records the proot pid. The pidfile is
+// created O_EXCL *before* spawning, so two concurrent starts cannot both
+// launch an init (the loser errors out instead of orphaning a session).
 func startDetached(name string, initCmd string, extraEnv []string) (int, error) {
 	proot, err := findProot()
 	if err != nil {
@@ -133,34 +127,46 @@ func startDetached(name string, initCmd string, extraEnv []string) (int, error) 
 	if err := os.MkdirAll(logDir(name), 0o700); err != nil {
 		return 0, err
 	}
+	pf, err := os.OpenFile(pidPath(name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, fmt.Errorf("machine %q is already starting or running (pidfile exists)", name)
+	}
 	logf, err := os.OpenFile(filepath.Join(logDir(name), "init.log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		pf.Close()
+		os.Remove(pidPath(name))
 		return 0, err
 	}
 	defer logf.Close()
 	fmt.Fprintf(logf, "\n--- cellar start %s: %s ---\n", time.Now().Format(time.RFC3339), initCmd)
 
-	guestCmd := []string{"/bin/sh", "-lc", initCmd}
+	guestCmd := []string{"/bin/sh", "-c", initCmd}
 	cmd := exec.Command(proot, prootArgs(rootfsDir(name), guestCmd)...)
 	cmd.Env = guestEnv(extraEnv)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
+		pf.Close()
+		os.Remove(pidPath(name))
 		return 0, err
 	}
 	pid := cmd.Process.Pid
-	if err := os.WriteFile(pidPath(name), []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+	_, werr := fmt.Fprintf(pf, "%d\n", pid)
+	if cerr := pf.Close(); werr != nil || cerr != nil {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		return 0, err
+		os.Remove(pidPath(name))
+		return 0, errors.Join(werr, cerr)
 	}
 	_ = cmd.Process.Release()
 	return pid, nil
 }
 
 // runningPid returns the machine's live init pid, or 0. Stale pidfiles
-// (dead process, or pid reused by something that isn't proot) count as
-// not running and are cleaned up.
+// (dead process, or pid reused by another process) count as not running
+// and are cleaned up. Identity check: the cmdline must reference THIS
+// machine's rootfs — matching just "proot" would let a reused pid point
+// at some other proot session, which stop would then kill.
 func runningPid(name string) int {
 	b, err := os.ReadFile(pidPath(name))
 	if err != nil {
@@ -168,10 +174,11 @@ func runningPid(name string) int {
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
 	if err != nil || pid <= 0 {
+		os.Remove(pidPath(name))
 		return 0
 	}
 	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil || !strings.Contains(string(cmdline), "proot") {
+	if err != nil || !strings.Contains(string(cmdline), rootfsDir(name)) {
 		os.Remove(pidPath(name))
 		return 0
 	}

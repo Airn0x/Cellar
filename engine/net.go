@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,31 +43,40 @@ func statOK(path string) bool {
 	return err == nil
 }
 
+// dnsServers returns the fallback resolver list. CELLAR_DNS accepts a
+// bare host ("9.9.9.9") or host:port ("9.9.9.9:5353").
+func dnsServers() []string {
+	s := os.Getenv("CELLAR_DNS")
+	if s == "" {
+		return []string{"1.1.1.1:53", "8.8.8.8:53"}
+	}
+	if _, _, err := net.SplitHostPort(s); err == nil {
+		return []string{s} // already host:port
+	}
+	return []string{net.JoinHostPort(s, "53")}
+}
+
 // Android has no /etc/resolv.conf, and a static (CGO-free) Go binary
 // can't use Bionic's resolver — the pure-Go resolver then tries
 // localhost:53 and dies. When the file is absent, resolve via public
 // DNS directly ($CELLAR_DNS overrides the server list).
+//
+// Servers rotate per dial attempt: a UDP "dial" succeeds even when the
+// server is unreachable (connectionless), so trying the list inside one
+// dial call would never advance past the first entry. Rotation makes
+// the resolver's own retries land on the next server.
 func setupResolver() {
 	if _, err := os.Stat("/etc/resolv.conf"); err == nil {
 		return
 	}
-	servers := []string{"1.1.1.1:53", "8.8.8.8:53"}
-	if s := os.Getenv("CELLAR_DNS"); s != "" {
-		servers = []string{net.JoinHostPort(s, "53")}
-	}
+	servers := dnsServers()
+	var attempt atomic.Uint64
 	net.DefaultResolver = &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			server := servers[int(attempt.Add(1)-1)%len(servers)]
 			d := net.Dialer{Timeout: 5 * time.Second}
-			var lastErr error
-			for _, s := range servers {
-				conn, err := d.DialContext(ctx, network, s)
-				if err == nil {
-					return conn, nil
-				}
-				lastErr = err
-			}
-			return nil, lastErr
+			return d.DialContext(ctx, network, server)
 		},
 	}
 }
