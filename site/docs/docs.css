@@ -1,0 +1,131 @@
+/* Cellar docs — same cellar, better lighting.
+   Loaded alongside ../assets/style.css via <link> (no @import chain). */
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 96px 24px 80px;
+  gap: 48px;
+}
+
+.side {
+  position: sticky;
+  top: 90px;
+  align-self: start;
+  font-size: 0.92rem;
+}
+.side .group { margin-bottom: 26px; }
+.side .group > b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 10px;
+}
+.side a {
+  display: block;
+  color: var(--muted);
+  padding: 5px 10px;
+  border-left: 2px solid var(--line);
+  transition: color 0.15s, border-color 0.15s;
+}
+.side a:hover { color: var(--ink); text-decoration: none; }
+.side a.here { color: var(--amber); border-left-color: var(--amber); }
+
+main.doc { min-width: 0; max-width: 760px; }
+
+/* anchor targets must clear the ~65px fixed nav */
+.doc h1, .doc h2, .doc h3, .doc [id] { scroll-margin-top: 84px; }
+
+.doc h1 {
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  margin-bottom: 10px;
+}
+.doc .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 40px; }
+
+.doc h2 {
+  font-size: 1.45rem;
+  margin: 48px 0 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.doc h3 { font-size: 1.08rem; margin: 28px 0 10px; color: var(--ink); }
+.doc p { color: var(--muted); margin-bottom: 14px; }
+.doc p strong, .doc li strong { color: var(--ink); }
+.doc ul, .doc ol { margin: 0 0 16px 22px; color: var(--muted); }
+.doc li { margin-bottom: 8px; }
+
+.doc pre {
+  background: #05070a;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  font-family: var(--mono);
+  font-size: 0.87rem;
+  line-height: 1.75;
+  overflow-x: auto;
+  margin: 0 0 18px;
+  color: var(--ink);
+}
+.doc pre .c { color: var(--dim); }
+.doc pre .p { color: var(--green); user-select: none; }
+.doc code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.doc pre code { background: none; border: none; padding: 0; }
+
+/* real tables (display:block would strip semantics for screen readers) */
+.doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 18px;
+  font-size: 0.92rem;
+}
+.doc th, .doc td {
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  vertical-align: top;
+}
+@media (max-width: 640px) {
+  .doc table { font-size: 0.82rem; }
+  .doc th, .doc td { padding: 8px 8px; }
+}
+.doc th { color: var(--ink); background: var(--bg-2); font-family: var(--mono); font-size: 0.8rem; }
+
+.callout {
+  border: 1px solid rgba(255, 180, 84, 0.3);
+  background: var(--amber-soft);
+  border-radius: 12px;
+  padding: 16px 18px;
+  color: var(--ink);
+  margin-bottom: 18px;
+  font-size: 0.95rem;
+}
+.callout.green { border-color: rgba(70, 212, 126, 0.3); background: var(--green-soft); }
+
+.doc .next {
+  margin-top: 56px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 860px) {
+  .docs-shell { grid-template-columns: 1fr; gap: 12px; }
+  .side { position: static; display: flex; flex-wrap: wrap; gap: 4px 14px; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+  .side .group { margin: 0; }
+  .side .group > b { display: none; }
+  .side a { border-left: none; padding: 4px 6px; }
+}
