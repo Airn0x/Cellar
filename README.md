@@ -40,6 +40,19 @@ A phone is the worst place to host a website and a surprisingly good place to ho
 - **Reachability** — phones live behind carrier NAT, so sharing a server means a tunnel
   (Tailscale / cloudflared integration planned).
 
+## Builds
+
+Test APKs are published on the [releases page](https://github.com/Airn0x/Cellar/releases)
+— arm64, Android 10+, debug-signed (Android will warn when installing). Pushing a `v*`
+tag builds and publishes a new one automatically.
+
+| version | what landed |
+|---|---|
+| [v0.4.0](https://github.com/Airn0x/Cellar/releases/tag/v0.4.0) | catalog, chat, console, setup screen, key vault |
+| [v0.3.0](https://github.com/Airn0x/Cellar/releases/tag/v0.3.0) | create wizard, machine actions, foreground service |
+| [v0.2.0](https://github.com/Airn0x/Cellar/releases/tag/v0.2.0) | proot + loader bundled — machines runnable from the app |
+| [v0.1.0](https://github.com/Airn0x/Cellar/releases/tag/v0.1.0) | app skeleton, engine executing inside the sandbox |
+
 ## Try it today (Termux, pre-app)
 
 The engine is a standalone CLI already usable under [Termux](https://termux.dev):
