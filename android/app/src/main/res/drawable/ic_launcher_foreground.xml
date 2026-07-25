@@ -1,0 +1,28 @@
+<!-- Launcher foreground. Adaptive icons are 108x108 with only the middle
+     72x72 (18..90) guaranteed visible, so the mark lives inside that. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M42,26 L66,26 A6,6 0 0 1 72,32 L72,76 A6,6 0 0 1 66,82 L42,82 A6,6 0 0 1 36,76 L36,32 A6,6 0 0 1 42,26 z"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFB454"
+        android:strokeWidth="4" />
+    <path
+        android:pathData="M43,40 L65,40"
+        android:strokeColor="#46D47E"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M43,54 L65,54"
+        android:strokeColor="#46D47E"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M43,68 L65,68"
+        android:strokeColor="#46D47E"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round" />
+</vector>

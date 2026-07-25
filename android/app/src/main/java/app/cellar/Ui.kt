@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -64,12 +65,45 @@ fun Card(
     accent: Color? = null,
     content: @Composable () -> Unit,
 ) {
+    // An accented card is tinted, not just outlined — a running machine
+    // should be obvious from across the room.
+    val fill = if (accent == null) listOf(PanelHi, PanelBg)
+    else listOf(accent.copy(alpha = 0.07f).compositeOver(PanelHi), PanelBg)
     Column(
         modifier.fillMaxWidth().clip(CardShape)
-            .background(Brush.verticalGradient(listOf(PanelHi, PanelBg)))
+            .background(Brush.verticalGradient(fill))
             .border(1.dp, accent?.copy(alpha = 0.35f) ?: LineColor, CardShape)
             .padding(16.dp),
     ) { content() }
+}
+
+/**
+ * Distro identity, so a list of machines is scannable before it's read.
+ * These tints are card-only and never collide with the status colours
+ * (green = running, red = broken).
+ */
+fun distroTint(distro: String): Color = when (distro) {
+    "alpine" -> Color(0xFF4EA8DE)
+    "debian" -> Color(0xFFE05A7A)
+    "ubuntu" -> Color(0xFFE8843C)
+    else -> Dim
+}
+
+@Composable
+fun DistroBadge(distro: String) {
+    val tint = distroTint(distro)
+    Box(
+        Modifier.size(38.dp).clip(RoundedCornerShape(11.dp))
+            .background(tint.copy(alpha = 0.10f))
+            .border(1.dp, tint.copy(alpha = 0.55f), RoundedCornerShape(11.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            distro.firstOrNull()?.uppercase() ?: "?",
+            color = tint, fontSize = 15.sp,
+            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold,
+        )
+    }
 }
 
 @Composable

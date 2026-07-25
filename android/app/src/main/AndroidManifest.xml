@@ -12,8 +12,10 @@
 
     <application
         android:label="Cellar"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:extractNativeLibs="true"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:theme="@style/Theme.Cellar">
         <activity
             android:name="app.cellar.MainActivity"
             android:exported="true">

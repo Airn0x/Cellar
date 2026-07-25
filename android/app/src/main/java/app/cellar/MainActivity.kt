@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -37,6 +39,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -162,6 +165,12 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Image(
+                painter = painterResource(R.drawable.ic_mark),
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+            )
+            Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
                 Text("cellar", color = Ink, fontSize = 22.sp, fontFamily = FontFamily.Monospace)
                 Text(
@@ -318,15 +327,8 @@ private fun MachinesTab(
                 accent = if (m.running) Green else null,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(
-                        when {
-                            m.broken -> Red
-                            m.running -> Green
-                            else -> Dim
-                        },
-                        pulsing = m.running,
-                    )
-                    Spacer(Modifier.width(10.dp))
+                    DistroBadge(m.distro)
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
                             m.name, color = Ink, fontSize = 17.sp,
@@ -341,6 +343,14 @@ private fun MachinesTab(
                             color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         )
                     }
+                    StatusDot(
+                        when {
+                            m.broken -> Red
+                            m.running -> Green
+                            else -> Dim
+                        },
+                        pulsing = m.running,
+                    )
                 }
                 Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
