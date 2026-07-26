@@ -1,0 +1,94 @@
+// Can a CGO-free Go binary allocate a PTY on Android, in an app-style
+// SELinux domain? This is the load-bearing question for a real terminal
+// in Cellar, so answer it with a syscall, not a search result.
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"syscall"
+	"unsafe"
+)
+
+func ioctl(fd, req, arg uintptr) error {
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, fd, req, arg); e != 0 {
+		return e
+	}
+	return nil
+}
+
+const (
+	TIOCGPTN   = 0x80045430
+	TIOCSPTLCK = 0x40045431
+	TIOCSWINSZ = 0x5414
+)
+
+type winsize struct{ Row, Col, X, Y uint16 }
+
+func main() {
+	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Println("FAIL open /dev/ptmx:", err)
+		os.Exit(1)
+	}
+	defer master.Close()
+	fmt.Println("ok: opened /dev/ptmx")
+
+	var unlock int32
+	if err := ioctl(master.Fd(), TIOCSPTLCK, uintptr(unsafe.Pointer(&unlock))); err != nil {
+		fmt.Println("FAIL TIOCSPTLCK:", err)
+		os.Exit(1)
+	}
+	var n uint32
+	if err := ioctl(master.Fd(), TIOCGPTN, uintptr(unsafe.Pointer(&n))); err != nil {
+		fmt.Println("FAIL TIOCGPTN:", err)
+		os.Exit(1)
+	}
+	slavePath := fmt.Sprintf("/dev/pts/%d", n)
+	fmt.Println("ok: pty number", n, "->", slavePath)
+
+	slave, err := os.OpenFile(slavePath, os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		fmt.Println("FAIL open slave:", err)
+		os.Exit(1)
+	}
+	defer slave.Close()
+	fmt.Println("ok: opened slave")
+
+	ws := winsize{Row: 40, Col: 100}
+	if err := ioctl(master.Fd(), TIOCSWINSZ, uintptr(unsafe.Pointer(&ws))); err != nil {
+		fmt.Println("warn TIOCSWINSZ:", err)
+	} else {
+		fmt.Println("ok: set window size 100x40")
+	}
+
+	// A real interactive program: does it see a terminal?
+	cmd := exec.Command("/bin/sh", "-c", "tty; echo COLUMNS=$(tput cols 2>/dev/null || echo ?); test -t 0 && echo 'STDIN IS A TTY'")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	if err := cmd.Start(); err != nil {
+		fmt.Println("FAIL start:", err)
+		os.Exit(1)
+	}
+	slave.Close()
+
+	buf := make([]byte, 4096)
+	total := 0
+	for {
+		n, err := master.Read(buf[total:])
+		if n > 0 {
+			total += n
+		}
+		if err != nil || total > 200 {
+			break
+		}
+		if total > 0 && err == io.EOF {
+			break
+		}
+	}
+	cmd.Wait()
+	fmt.Printf("guest saw:\n%s\n", string(buf[:total]))
+	fmt.Println("RESULT: pure-Go PTY works in this domain")
+}
