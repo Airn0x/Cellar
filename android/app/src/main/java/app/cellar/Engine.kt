@@ -49,6 +49,7 @@ class Engine(context: Context) {
         val verified: Boolean,
         val needsKey: String,
         val chat: String,
+        val check: String,
         val distros: List<String>,
     ) {
         val chatCapable: Boolean get() = chat.isNotEmpty()
@@ -96,9 +97,10 @@ class Engine(context: Context) {
         }
     }
 
-    private fun processBuilder(args: List<String>): ProcessBuilder {
+    private fun processBuilder(args: List<String>, mergeStderr: Boolean = true): ProcessBuilder {
         home.mkdirs(); tmp.mkdirs()
-        val pb = ProcessBuilder(listOf(engineBin.absolutePath) + args).redirectErrorStream(true)
+        val pb = ProcessBuilder(listOf(engineBin.absolutePath) + args)
+            .redirectErrorStream(mergeStderr)
         pb.environment().apply {
             put("CELLAR_HOME", home.absolutePath)
             put("CELLAR_PROOT", prootBin.absolutePath)
@@ -168,6 +170,17 @@ class Engine(context: Context) {
         }
     }
 
+    /**
+     * Starts a PTY session. Raw handle rather than a suspend call: the
+     * session outlives any one screen, and stderr must NOT be merged —
+     * engine warnings would corrupt the terminal byte stream.
+     */
+    fun attachProcess(machine: String, cols: Int, rows: Int): Process =
+        processBuilder(
+            listOf("attach", machine, "--cols", cols.toString(), "--rows", rows.toString()),
+            mergeStderr = false,
+        ).start()
+
     suspend fun catalog(): List<Stack> {
         val r = run("catalog", "--json")
         if (!r.ok) return emptyList()
@@ -184,11 +197,24 @@ class Engine(context: Context) {
                     verified = o.optBoolean("verified"),
                     needsKey = o.optString("needs_key"),
                     chat = o.optString("chat"),
+                    check = o.optString("check"),
                     distros = if (d == null) emptyList() else (0 until d.length()).map { d.getString(it) },
                 )
             }
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    /** Which stacks this machine already has — the fact users care about. */
+    suspend fun installed(machine: String): Set<String> {
+        val r = run("installed", machine, "--json")
+        if (!r.ok) return emptySet()
+        return try {
+            val o = org.json.JSONObject(r.output.ifEmpty { "{}" })
+            o.keys().asSequence().filter { o.optBoolean(it) }.toSet()
+        } catch (e: Exception) {
+            emptySet()
         }
     }
 

@@ -9,10 +9,16 @@ if command -v claude >/dev/null 2>&1; then
 	exit 0
 fi
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq nodejs npm git ca-certificates
-npm install -g --no-fund --no-audit @anthropic-ai/claude-code
+apt-get update -qq >/dev/null
+apt-get install -y -qq nodejs npm git ca-certificates >/dev/null
+echo "installing Claude Code (~250 MB with node)"
+npm install -g --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code >/tmp/cc-npm.log 2>&1 || true
 # npm skips lifecycle scripts when running as (fake) root; the launcher
 # is set up by the package's postinstall, so run it explicitly.
-cd "$(npm root -g)/@anthropic-ai/claude-code" && node install.cjs
+cd "$(npm root -g)/@anthropic-ai/claude-code" 2>/dev/null || {
+	echo "npm did not unpack the package. last lines of its log:"
+	tail -15 /tmp/cc-npm.log
+	exit 1
+}
+node install.cjs >/dev/null 2>&1 || true
 claude --version

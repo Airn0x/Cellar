@@ -1,10 +1,14 @@
 {
   "name": "claude-code",
   "description": "Claude Code — Anthropic's agentic coding CLI",
-  "distros": ["debian", "ubuntu"],
+  "distros": [
+    "debian",
+    "ubuntu"
+  ],
   "category": "agent",
   "size": "~250 MB (node + npm)",
   "verified": true,
   "needs_key": "ANTHROPIC_API_KEY",
-  "chat": "claude -p"
+  "chat": "claude -p",
+  "check": "claude"
 }

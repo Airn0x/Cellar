@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  :root{ --bg:#05070a; --amber:#ffb454; --line:#1b2230; --dim:#7b8698; --panel:#0e1219 }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;
+    font-family:ui-monospace,Menlo,Consolas,monospace}
+  #term{position:absolute;inset:0 0 var(--keys,52px) 0;padding:6px}
+  .xterm{height:100%}
+  /* Extra keys: a soft keyboard cannot type Esc, Tab, Ctrl or arrows,
+     and a terminal without them is decoration. */
+  #keys{
+    position:absolute;left:0;right:0;bottom:0;height:52px;display:flex;gap:6px;
+    align-items:center;padding:0 8px;overflow-x:auto;background:var(--panel);
+    border-top:1px solid var(--line);-webkit-overflow-scrolling:touch;
+  }
+  #keys button{
+    flex:none;min-width:44px;height:36px;border-radius:9px;border:1px solid var(--line);
+    background:#141a24;color:#e9e5da;font-family:inherit;font-size:12px;cursor:pointer;
+  }
+  #keys button:active{background:var(--amber);color:#05070a}
+  #keys button[data-sticky=on]{background:var(--amber);color:#05070a;border-color:var(--amber)}
+</style>
+</head>
+<body>
+<div id="term"></div>
+<div id="keys"></div>
+
+<script src="xterm.js"></script>
+<script>
+// One terminal, two transports. In the app the bridge is a
+// JavascriptInterface; in the browser test harness it is HTTP + SSE.
+// terminal.js never knows which — so what gets tested is what ships.
+const term = new Terminal({
+  cursorBlink: true,
+  fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+  fontSize: 13,
+  scrollback: 2000,
+  allowProposedApi: true,
+  theme: {
+    background: '#05070a', foreground: '#e9e5da', cursor: '#ffb454',
+    selectionBackground: 'rgba(255,180,84,.30)',
+    black: '#0e1219', red: '#ff6b6b', green: '#46d47e', yellow: '#ffb454',
+    blue: '#4ea8de', magenta: '#e05a7a', cyan: '#5bc8c0', white: '#e9e5da',
+    brightBlack: '#7b8698', brightRed: '#ff8a8a', brightGreen: '#6ee79b',
+    brightYellow: '#ffc98a', brightBlue: '#79c0f0', brightMagenta: '#f08aa6',
+    brightCyan: '#8adcd6', brightWhite: '#ffffff',
+  },
+});
+term.open(document.getElementById('term'));
+
+// ---- transport ----
+const bridge = window.CellarBridge || null;   // Android
+let post = null;                              // browser harness fallback
+
+function sendBytes(data) {
+  const b64 = btoa(unescape(encodeURIComponent(data)));
+  if (bridge) bridge.send(b64); else if (post) post(b64);
+}
+
+// Kotlin (or the harness) calls this with base64 pty output.
+window.termWrite = function (b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  term.write(bytes);
+};
+
+term.onData(sendBytes);
+
+// ---- sizing: character cells from the real element size ----
+function fit() {
+  const el = document.getElementById('term');
+  const core = term._core;
+  const cw = core?._renderService?.dimensions?.css?.cell?.width || 8;
+  const ch = core?._renderService?.dimensions?.css?.cell?.height || 17;
+  const cols = Math.max(20, Math.floor((el.clientWidth - 12) / cw));
+  const rows = Math.max(6, Math.floor((el.clientHeight - 12) / ch));
+  if (cols !== term.cols || rows !== term.rows) {
+    term.resize(cols, rows);
+    if (bridge) bridge.resize(cols, rows);
+    else if (window.postResize) window.postResize(cols, rows);
+  }
+}
+window.addEventListener('resize', fit);
+setTimeout(fit, 50);
+window.termFit = fit;
+
+// ---- extra keys ----
+const CTRL = { key: 'Ctrl', sticky: true };
+const KEYS = [
+  { key: 'Esc', send: '\x1b' },
+  CTRL,
+  { key: 'Tab', send: '\t' },
+  { key: '↑', send: '\x1b[A' },
+  { key: '↓', send: '\x1b[B' },
+  { key: '←', send: '\x1b[D' },
+  { key: '→', send: '\x1b[C' },
+  { key: '^C', send: '\x03' },
+  { key: '^D', send: '\x04' },
+  { key: '|', send: '|' },
+  { key: '~', send: '~' },
+  { key: '/', send: '/' },
+  { key: '-', send: '-' },
+  { key: 'Home', send: '\x1bOH' },
+  { key: 'End', send: '\x1bOF' },
+];
+
+let ctrlArmed = false;
+const keysEl = document.getElementById('keys');
+KEYS.forEach(k => {
+  const b = document.createElement('button');
+  b.textContent = k.key;
+  b.dataset.key = k.key;
+  b.onclick = () => {
+    if (k.sticky) {
+      ctrlArmed = !ctrlArmed;
+      b.dataset.sticky = ctrlArmed ? 'on' : 'off';
+      term.focus();
+      return;
+    }
+    sendBytes(k.send);
+    term.focus();
+  };
+  keysEl.appendChild(b);
+});
+
+// Ctrl acts on the next printable key, the way Termux's bar does.
+term.attachCustomKeyEventHandler(e => {
+  if (!ctrlArmed || e.type !== 'keydown') return true;
+  const c = e.key;
+  if (c && c.length === 1) {
+    const code = c.toUpperCase().charCodeAt(0) - 64;
+    if (code > 0 && code < 27) {
+      sendBytes(String.fromCharCode(code));
+      ctrlArmed = false;
+      const btn = keysEl.querySelector('[data-key="Ctrl"]');
+      if (btn) btn.dataset.sticky = 'off';
+      return false;
+    }
+  }
+  return true;
+});
+
+term.focus();
+window.termReady = true;
+</script>
+</body>
+</html>

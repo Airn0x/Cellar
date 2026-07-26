@@ -3,5 +3,6 @@
   "description": "Python 3 + uv package manager",
   "category": "runtime",
   "size": "~120 MB",
-  "verified": true
+  "verified": true,
+  "check": "uv"
 }

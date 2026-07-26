@@ -5,5 +5,6 @@
   "size": "~200 MB (python + deps)",
   "verified": true,
   "needs_key": "ANTHROPIC_API_KEY",
-  "chat": "aider --no-git --yes --message"
+  "chat": "aider --no-git --yes --message",
+  "check": "aider"
 }

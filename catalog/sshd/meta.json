@@ -3,5 +3,6 @@
   "description": "OpenSSH server on port 2222 (set a root password first)",
   "category": "service",
   "size": "~15 MB",
-  "verified": true
+  "verified": true,
+  "check": "sshd"
 }

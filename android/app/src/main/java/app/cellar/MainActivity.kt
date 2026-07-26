@@ -58,14 +58,14 @@ private val DISTROS = listOf(
 private const val MACHINES = "machines"
 private const val CATALOG = "catalog"
 private const val CHAT = "chat"
-private const val CONSOLE = "console"
+private const val TERMINAL = "terminal"
 private const val SETUP = "setup"
 
 private val NAV = listOf(
     MACHINES to "▤",
     CATALOG to "◈",
     CHAT to "✦",
-    CONSOLE to "❯",
+    TERMINAL to "❯",
     SETUP to "⚙",
 )
 
@@ -100,10 +100,13 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
     var status by remember { mutableStateOf("starting…") }
     var machines by remember { mutableStateOf<List<Engine.Machine>>(emptyList()) }
     var stacks by remember { mutableStateOf<List<Engine.Stack>>(emptyList()) }
+    var installed by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var catalogMachine by remember { mutableStateOf<String?>(null) }
 
     // Work state. `busy` is a label while something runs; the log stays
     // visible afterwards in a strip the user can dismiss — nothing ever
     // takes over the screen.
+    var terminalMachine by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     var showLog by remember { mutableStateOf(false) }
     var stripVisible by remember { mutableStateOf(false) }
@@ -112,6 +115,9 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
     suspend fun refresh() {
         machines = engine.list()
         if (stacks.isEmpty()) stacks = engine.catalog()
+        val target = catalogMachine ?: machines.firstOrNull { !it.broken }?.name
+        if (catalogMachine != target) catalogMachine = target
+        if (target != null) installed = engine.installed(target)
         CellarService.sync(context, machines.count { it.running }, busy)
     }
 
@@ -208,6 +214,7 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
             when (tab) {
                 MACHINES -> MachinesTab(
                     machines = machines,
+                    onTerminal = { m -> terminalMachine = m.name; tab = TERMINAL },
                     onCreate = { distro ->
                         val name = nextName(machines, distro)
                         work("creating $name") { engine.create(name, distro, ::logLine) }
@@ -232,16 +239,25 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
                 CATALOG -> CatalogTab(
                     stacks = stacks,
                     machines = machines,
+                    installed = installed,
+                    selected = catalogMachine,
+                    onSelect = { name ->
+                        catalogMachine = name
+                        scope.launch { installed = engine.installed(name) }
+                    },
+                    onOpenTerminal = { m -> terminalMachine = m; tab = TERMINAL },
                     onInstall = { stack, machine ->
                         work("installing ${stack.name} → $machine") {
                             showLog = true
-                            engine.apply(machine, stack.name, ::logLine)
+                            val r = engine.apply(machine, stack.name, ::logLine)
+                            logLine(if (r.ok) "✓ ${stack.name} installed" else "✕ ${stack.name} failed")
+                            installed = engine.installed(machine)
                         }
                     },
                 )
 
                 CHAT -> ChatTab(engine, vault, machines, stacks)
-                CONSOLE -> ConsoleTab(engine, machines)
+                TERMINAL -> TerminalTab(engine, machines, terminalMachine) { terminalMachine = it }
                 SETUP -> SetupTab(engine, vault, context)
             }
             Spacer(Modifier.height(24.dp))
@@ -266,6 +282,7 @@ private fun nextName(machines: List<Engine.Machine>, distro: String): String {
 @Composable
 private fun MachinesTab(
     machines: List<Engine.Machine>,
+    onTerminal: (Engine.Machine) -> Unit,
     onCreate: (String) -> Unit,
     onStart: (Engine.Machine) -> Unit,
     onStop: (Engine.Machine) -> Unit,
@@ -355,8 +372,9 @@ private fun MachinesTab(
                 Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (!m.broken) {
+                        Pill("terminal", Green, filled = true) { onTerminal(m) }
                         if (m.running) Pill("stop", Amber) { onStop(m) }
-                        else Pill("start", Green, filled = true) { onStart(m) }
+                        else Pill("start", Muted) { onStart(m) }
                         Pill("logs", Muted) { onLogs(m) }
                     }
                     Pill("remove", Red) { onRemove(m) }
@@ -370,17 +388,20 @@ private fun MachinesTab(
 private fun CatalogTab(
     stacks: List<Engine.Stack>,
     machines: List<Engine.Machine>,
+    installed: Set<String>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+    onOpenTerminal: (String) -> Unit,
     onInstall: (Engine.Stack, String) -> Unit,
 ) {
-    var open by remember { mutableStateOf<String?>(null) }
-    val verified = stacks.filter { it.verified }
-    val unverified = stacks.filterNot { it.verified }
+    val usable = machines.filter { !it.broken }
+    val target = selected ?: usable.firstOrNull()?.name
 
     Column {
-        SectionTitle("ONE-TAP STACKS")
+        SectionTitle("CATALOG")
         Spacer(Modifier.height(12.dp))
 
-        if (machines.isEmpty()) {
+        if (usable.isEmpty()) {
             Card {
                 Text("create a machine first", color = Ink, fontSize = 15.sp)
                 Spacer(Modifier.height(6.dp))
@@ -392,21 +413,36 @@ private fun CatalogTab(
             return@Column
         }
 
-        verified.forEach { s ->
-            StackCard(s, machines, open == s.name, {
-                open = if (open == s.name) null else s.name
-            }, onInstall)
+        // "installed" is a fact about a machine, so the machine is part of
+        // the question the page answers.
+        Text("showing what's installed in:", color = Dim, fontSize = 11.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            usable.forEach { m ->
+                Pill(m.name, Green, filled = m.name == target) { onSelect(m.name) }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        val fits = stacks.filter { s -> usable.any { it.name == target && s.runsOn(it.distro) } }
+        val (have, rest) = fits.partition { it.name in installed }
+
+        if (have.isNotEmpty()) {
+            SectionTitle("INSTALLED HERE")
+            Spacer(Modifier.height(10.dp))
+            have.forEach { s ->
+                StackCard(s, true, target) { onOpenTerminal(target ?: return@StackCard) }
+            }
+            Spacer(Modifier.height(18.dp))
         }
 
-        if (unverified.isNotEmpty()) {
-            Spacer(Modifier.height(18.dp))
-            SectionTitle("NOT YET VERIFIED ON A PHONE")
-            Spacer(Modifier.height(8.dp))
-            unverified.forEach { s ->
-                StackCard(s, machines, open == s.name, {
-                    open = if (open == s.name) null else s.name
-                }, onInstall)
-            }
+        SectionTitle("AVAILABLE")
+        Spacer(Modifier.height(10.dp))
+        rest.forEach { s ->
+            StackCard(s, false, target) { m -> onInstall(s, m) }
+        }
+        if (rest.isEmpty()) {
+            Text("everything in the catalog is installed here", color = Dim, fontSize = 12.sp)
         }
     }
 }
@@ -414,57 +450,40 @@ private fun CatalogTab(
 @Composable
 private fun StackCard(
     s: Engine.Stack,
-    machines: List<Engine.Machine>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onInstall: (Engine.Stack, String) -> Unit,
+    isInstalled: Boolean,
+    machine: String?,
+    onAction: (String) -> Unit,
 ) {
     Card(
-        Modifier.padding(bottom = 10.dp).clickable(onClick = onToggle),
-        accent = if (expanded) Amber else null,
+        Modifier.padding(bottom = 10.dp),
+        accent = if (isInstalled) Green else null,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    s.name, color = Ink, fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Text(s.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(s.description, color = Muted, fontSize = 12.sp)
                 val notes = listOfNotNull(
                     s.category.takeIf { it.isNotEmpty() },
                     s.size.takeIf { it.isNotEmpty() },
-                    s.needsKey.takeIf { it.isNotEmpty() }?.let { "needs $it" },
                 ).joinToString(" · ")
                 if (notes.isNotEmpty()) {
                     Spacer(Modifier.height(3.dp))
+                    Text(notes, color = Dim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
+                // Only the unusual case is flagged. No badge means nothing
+                // is wrong — a tick on everything told users nothing.
+                if (!s.verified) {
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        notes, color = Dim, fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
+                        "not yet verified on a phone",
+                        color = Amber, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
                     )
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (s.verified) "✓" else "?",
-                color = if (s.verified) Green else Amber, fontSize = 15.sp,
-            )
-        }
-        if (expanded) {
-            Spacer(Modifier.height(14.dp))
-            val usable = machines.filter { !it.broken && s.runsOn(it.distro) }
-            if (usable.isEmpty()) {
-                Text(
-                    "needs a ${s.distros.joinToString("/")} machine — create one first",
-                    color = Amber, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                )
-            } else {
-                Text("install into:", color = Dim, fontSize = 11.sp)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    usable.forEach { m ->
-                        Pill(m.name, Green, filled = true) { onInstall(s, m.name) }
-                    }
-                }
+            Spacer(Modifier.width(10.dp))
+            if (machine != null) {
+                if (isInstalled) Pill("open", Green, filled = true) { onAction(machine) }
+                else Pill("install", Amber, filled = true) { onAction(machine) }
             }
         }
     }

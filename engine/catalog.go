@@ -25,6 +25,10 @@ type StackMeta struct {
 	// Chat is a headless command taking a prompt as its final argument
 	// ("claude -p"); its presence makes a stack usable from the chat tab.
 	Chat string `json:"chat,omitempty"`
+	// Check is a binary whose presence means the stack is installed. This
+	// is what a UI should show — "installed here" is a fact about a
+	// machine, while Verified is a fact about the stack.
+	Check string `json:"check,omitempty"`
 }
 
 // catalogDir resolution order: $CELLAR_CATALOG, catalog/ next to the

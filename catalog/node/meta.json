@@ -3,5 +3,6 @@
   "description": "Node.js + npm",
   "category": "runtime",
   "size": "~200 MB",
-  "verified": true
+  "verified": true,
+  "check": "node"
 }

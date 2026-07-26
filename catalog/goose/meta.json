@@ -1,10 +1,14 @@
 {
   "name": "goose",
   "description": "Goose — Block's extensible on-machine AI agent",
-  "distros": ["debian", "ubuntu"],
+  "distros": [
+    "debian",
+    "ubuntu"
+  ],
   "category": "agent",
   "size": "~80 MB",
   "verified": true,
   "needs_key": "ANTHROPIC_API_KEY",
-  "chat": "goose run -t"
+  "chat": "goose run -t",
+  "check": "goose"
 }

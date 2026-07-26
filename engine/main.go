@@ -23,6 +23,7 @@ usage:
   cellar create <name> --distro alpine|debian|ubuntu [--release R] [--json]
   cellar ls [--json]
   cellar shell <name>
+  cellar attach <name> [--cols N --rows N] [--raw] [-e K=V]...
   cellar exec <name> [-e K=V]... -- <command...>
   cellar start <name> [-e K=V]... [-- <init command...>]
   cellar stop <name>
@@ -31,6 +32,7 @@ usage:
   cellar export <name> [-o file.tar.gz]
   cellar apply <machine> <stack>
   cellar catalog [--json]
+  cellar installed <machine> [--json]
   cellar version
 
 environment:
@@ -93,6 +95,8 @@ func main() {
 		cmdLs(os.Args[2:])
 	case "shell":
 		cmdShell(os.Args[2:])
+	case "attach":
+		cmdAttach(os.Args[2:])
 	case "exec":
 		cmdExec(os.Args[2:])
 	case "start":
@@ -109,6 +113,8 @@ func main() {
 		cmdApply(os.Args[2:])
 	case "catalog":
 		cmdCatalog(os.Args[2:])
+	case "installed":
+		cmdInstalled(os.Args[2:])
 	case "version":
 		fmt.Println("cellar", version)
 	case "help", "-h", "--help":
@@ -256,6 +262,30 @@ func cmdShell(args []string) {
 	// login shell; bash if the machine has it, sh otherwise
 	code, err := runRaw(args[0], []string{"/bin/sh", "-lc",
 		"if [ -x /bin/bash ]; then exec /bin/bash -l; else exec /bin/sh -l; fi"}, nil)
+	if err != nil {
+		die(err)
+	}
+	os.Exit(code)
+}
+
+// cmdAttach is the terminal entry point: a PTY-backed interactive shell.
+// GUIs speak the framed protocol on stdin (see pty.go); --raw is for a
+// human running this from a real terminal.
+func cmdAttach(args []string) {
+	flagPart, _ := splitDashDash(args)
+	fs := flag.NewFlagSet("attach", flag.ExitOnError)
+	cols := fs.Int("cols", 80, "terminal width")
+	rows := fs.Int("rows", 24, "terminal height")
+	raw := fs.Bool("raw", false, "copy stdin through instead of the framed protocol")
+	var env envFlags
+	fs.Var(&env, "e", "extra env K=V (repeatable)")
+	name, rest := popName(flagPart)
+	fs.Parse(rest)
+	if name == "" || fs.NArg() != 0 {
+		die(fmt.Errorf("usage: cellar attach <name> [--cols N --rows N] [--raw]"))
+	}
+	mustMachine(name)
+	code, err := attach(name, *cols, *rows, *raw, env)
 	if err != nil {
 		die(err)
 	}
@@ -410,6 +440,59 @@ func cmdApply(args []string) {
 		die(fmt.Errorf("stack %q failed with exit code %d", args[1], code))
 	}
 	fmt.Printf("applied %q to %q\n", args[1], args[0])
+}
+
+// cmdInstalled answers the only catalog question a user actually has:
+// what does THIS machine already have? One `command -v` per stack, in a
+// single guest shell — cheap enough to run whenever a UI opens.
+func cmdInstalled(args []string) {
+	fs := flag.NewFlagSet("installed", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "list as JSON")
+	name, rest := popName(args)
+	fs.Parse(rest)
+	if name == "" || fs.NArg() != 0 {
+		die(fmt.Errorf("usage: cellar installed <machine> [--json]"))
+	}
+	mustMachine(name)
+	stacks, err := listStacks()
+	if err != nil {
+		die(err)
+	}
+	var probes []string
+	var names []string
+	for _, s := range stacks {
+		if s.Check == "" {
+			continue
+		}
+		names = append(names, s.Name)
+		probes = append(probes, fmt.Sprintf("command -v %s >/dev/null 2>&1 && echo %s", s.Check, s.Name))
+	}
+	found := map[string]bool{}
+	if len(probes) > 0 {
+		out, err := captureInMachine(name, strings.Join(probes, "; "))
+		if err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					found[line] = true
+				}
+			}
+		}
+	}
+	if *asJSON {
+		rows := make(map[string]bool, len(names))
+		for _, n := range names {
+			rows[n] = found[n]
+		}
+		json.NewEncoder(os.Stdout).Encode(rows)
+		return
+	}
+	for _, n := range names {
+		state := "-"
+		if found[n] {
+			state = "installed"
+		}
+		fmt.Printf("%-14s %s\n", n, state)
+	}
 }
 
 func cmdCatalog(args []string) {

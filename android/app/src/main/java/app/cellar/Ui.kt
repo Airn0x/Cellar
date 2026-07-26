@@ -368,7 +368,12 @@ fun ActivityStrip(
         }
         if (expanded) {
             Spacer(Modifier.height(12.dp))
-            OutputPane(lines.takeLast(60), "working…")
+            // capped and self-scrolling: an install log must never grow
+            // until it owns the whole screen
+            OutputPane(
+                lines.takeLast(200), "working…",
+                Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()),
+            )
         }
     }
 }

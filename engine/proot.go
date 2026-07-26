@@ -288,3 +288,18 @@ func parentOf(pid int) (int, bool) {
 	ppid, err := strconv.Atoi(fields[1])
 	return ppid, err == nil
 }
+
+// captureInMachine runs a shell snippet inside the machine and returns
+// its stdout. Used for quick probes (is this installed?) where streaming
+// to the terminal would be noise.
+func captureInMachine(name, script string) (string, error) {
+	proot, err := findProot()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command(proot, prootArgs(rootfsDir(name), machineShm(name),
+		[]string{"/bin/sh", "-c", script})...)
+	cmd.Env = guestEnv(nil)
+	out, err := cmd.Output()
+	return string(out), err
+}
