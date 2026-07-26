@@ -62,9 +62,15 @@ fun TerminalView(session: TerminalSession, modifier: Modifier = Modifier) {
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            WebView(ctx).apply {
+            TerminalWebView(ctx).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.setSupportZoom(false)
+                settings.builtInZoomControls = false
+                isFocusable = true
+                isFocusableInTouchMode = true
+                isHorizontalScrollBarEnabled = false
+                isVerticalScrollBarEnabled = false
                 setBackgroundColor(0xFF05070A.toInt())
                 addJavascriptInterface(TerminalBridge(session), "CellarBridge")
                 webViewClient = object : WebViewClient() {
@@ -129,14 +135,11 @@ fun TerminalTab(
         val active = machine
         if (active != null) {
             val session = remember(active) { SessionStore.open(engine, active) }
-            Card(Modifier.fillMaxWidth().height(520.dp), accent = Green) {
+            // fills whatever height is left, so the keyboard shrinking the
+            // window shrinks the terminal instead of hiding it
+            Card(Modifier.fillMaxWidth().weight(1f), accent = Green) {
                 TerminalView(session, Modifier.fillMaxSize())
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "a real shell — sessions keep running when you leave the app",
-                color = Dim, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
-            )
         }
     }
 }

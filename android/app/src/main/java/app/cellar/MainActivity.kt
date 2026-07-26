@@ -196,8 +196,12 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
         }
 
         // ---- content ----
+        // The terminal manages its own scrolling and must receive drags;
+        // wrapping it in a scrollable column is what made touch "not work".
+        val scrolls = tab != TERMINAL
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState())
+            Modifier.weight(1f)
+                .then(if (scrolls) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                 .padding(horizontal = 18.dp),
         ) {
             if (stripVisible) {
@@ -260,7 +264,7 @@ private fun App(engine: Engine, vault: Vault, context: Context) {
                 TERMINAL -> TerminalTab(engine, machines, terminalMachine) { terminalMachine = it }
                 SETUP -> SetupTab(engine, vault, context)
             }
-            Spacer(Modifier.height(24.dp))
+            if (scrolls) Spacer(Modifier.height(24.dp))
         }
 
         // ---- bottom nav ----

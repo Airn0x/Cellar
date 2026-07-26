@@ -146,6 +146,62 @@ term.attachCustomKeyEventHandler(e => {
   return true;
 });
 
+// ---- touch: a terminal on a tablet must scroll and focus by finger ----
+// xterm.js is built for a mouse; without this, drags do nothing and taps
+// never raise the keyboard, which reads as "the touchscreen is dead".
+(function () {
+  const el = document.getElementById('term');
+  let startY = 0, startX = 0, lastY = 0, moved = false, cellH = 17;
+
+  el.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    startY = lastY = t.clientY;
+    startX = t.clientX;
+    moved = false;
+    cellH = term._core?._renderService?.dimensions?.css?.cell?.height || 17;
+  }, { passive: true });
+
+  el.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    const dy = lastY - t.clientY;
+    if (Math.abs(t.clientY - startY) > 8 || Math.abs(t.clientX - startX) > 8) moved = true;
+    const lines = Math.trunc(dy / cellH);
+    if (lines !== 0) {
+      term.scrollLines(lines);
+      lastY = t.clientY;
+    }
+  }, { passive: true });
+
+  el.addEventListener('touchend', () => {
+    if (!moved) term.focus();   // a tap means "type here" -> raises the IME
+  }, { passive: true });
+})();
+
+// ---- the IME must not treat a shell like a text message ----
+function tameInput() {
+  const ta = document.querySelector('.xterm-helper-textarea');
+  if (!ta) return;
+  ta.setAttribute('autocomplete', 'off');
+  ta.setAttribute('autocorrect', 'off');
+  ta.setAttribute('autocapitalize', 'none');
+  ta.setAttribute('spellcheck', 'false');
+  ta.setAttribute('enterkeyhint', 'send');
+}
+tameInput();
+
+// ---- the keyboard changes the usable height, so re-fit when it does ----
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  const onViewport = () => {
+    // shrink the terminal to what is actually visible above the keyboard
+    document.getElementById('term').style.bottom =
+      Math.max(0, (window.innerHeight - vv.height - vv.offsetTop)) + 52 + 'px';
+    fit();
+  };
+  vv.addEventListener('resize', onViewport);
+  vv.addEventListener('scroll', onViewport);
+}
+
 term.focus();
 window.termReady = true;
 </script>

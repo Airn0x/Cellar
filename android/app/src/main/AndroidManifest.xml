@@ -18,7 +18,9 @@
         android:theme="@style/Theme.Cellar">
         <activity
             android:name="app.cellar.MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
