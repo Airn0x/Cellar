@@ -91,10 +91,10 @@ fun ChatTab(
         }
         Spacer(Modifier.height(14.dp))
 
-        OutputPane(
-            transcript,
-            "ask something — it runs inside ${machine ?: "a machine"} and answers here",
-            Modifier.heightIn(min = 180.dp),
+        TerminalBlock(
+            lines = transcript,
+            empty = "ask something — it runs inside ${machine ?: "a machine"} and answers here",
+            title = "${agent?.name ?: "agent"} @ ${machine ?: "-"}",
         )
         Spacer(Modifier.height(12.dp))
 
@@ -199,49 +199,36 @@ fun ConsoleTab(engine: Engine, machines: List<Engine.Machine>) {
         }
         Spacer(Modifier.height(14.dp))
 
-        history.forEach { (cmd, out) ->
-            Card(Modifier.padding(bottom = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "$", color = Green, fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        cmd, color = Ink, fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f),
-                    )
-                }
-                if (out.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    out.takeLast(40).forEach {
-                        Text(
-                            it, color = Muted, fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace, lineHeight = 16.sp,
-                        )
+        // One scrollback, like a terminal — and the same input row is
+        // reused inside the fullscreen view, so expanding loses nothing.
+        val stream = history.flatMap { (cmd, out) -> listOf("$ $cmd") + out + "" }
+        val inputRow: @Composable () -> Unit = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Field(
+                    command, "type a command…",
+                    modifier = Modifier.weight(1f),
+                ) { command = it }
+                Spacer(Modifier.width(8.dp))
+                if (running) {
+                    StatusDot(Amber, pulsing = true)
+                } else {
+                    Pill("run", Amber, filled = true) {
+                        val c = command.trim()
+                        command = ""
+                        run(c)
                     }
                 }
             }
         }
 
-        Field(command, "type a command…", modifier = Modifier.fillMaxWidth()) { command = it }
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (running) {
-                StatusDot(Amber, pulsing = true)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "running…", color = Amber, fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            } else {
-                Pill("run", Amber, filled = true) {
-                    val c = command.trim()
-                    command = ""
-                    run(c)
-                }
-            }
-        }
+        TerminalBlock(
+            lines = stream,
+            empty = "output appears here — tap ⛶ full for the whole screen",
+            title = "${machine ?: "-"} · console",
+            input = inputRow,
+        )
+        Spacer(Modifier.height(12.dp))
+        inputRow()
         Spacer(Modifier.height(12.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QUICK.forEach { q -> Chip(q) { command = q } }

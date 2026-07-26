@@ -13,18 +13,29 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -33,14 +44,19 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
 
 // The cellar palette — a warm bulb in a dark basement (cellar.parallex.in).
@@ -193,21 +209,123 @@ fun Field(
     }
 }
 
-/** Monospace output — console, chat replies, install logs. */
+/**
+ * Monospace output — console, chat replies, install logs.
+ * Text is selectable: on a phone, output you cannot copy is output you
+ * cannot use.
+ */
 @Composable
 fun OutputPane(lines: List<String>, empty: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier.fillMaxWidth().clip(CardShape).background(ConsoleBg)
-            .border(1.dp, LineColor, CardShape).padding(14.dp),
-    ) {
-        if (lines.isEmpty()) {
-            Text(empty, color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+    SelectionContainer {
+        Column(
+            modifier.fillMaxWidth().clip(CardShape).background(ConsoleBg)
+                .border(1.dp, LineColor, CardShape).padding(14.dp),
+        ) {
+            if (lines.isEmpty()) {
+                Text(empty, color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            }
+            lines.forEach {
+                Text(
+                    it, color = if (it.startsWith("$") || it.startsWith(">")) Green else Muted,
+                    fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp,
+                )
+            }
         }
-        lines.forEach {
+    }
+}
+
+/**
+ * Output with the two things a phone screen needs: copy, and a way to
+ * escape the little box. Fullscreen is a real terminal-shaped view —
+ * whole screen, monospace, scrolled to the newest line.
+ */
+@Composable
+fun TerminalBlock(
+    lines: List<String>,
+    empty: String,
+    title: String,
+    minHeight: Dp = 200.dp,
+    input: (@Composable () -> Unit)? = null,
+) {
+    var full by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val scroll = rememberScrollState()
+
+    LaunchedEffect(lines.size) { scroll.animateScrollTo(scroll.maxValue) }
+
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
-                it, color = if (it.startsWith("$") || it.startsWith(">")) Green else Muted,
-                fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp,
+                title, color = Dim, fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f),
             )
+            if (lines.isNotEmpty()) {
+                Pill("copy", Muted) {
+                    clipboard.setText(AnnotatedString(lines.joinToString("\n")))
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            Pill("⛶ full", Amber) { full = true }
+        }
+        Spacer(Modifier.height(8.dp))
+        OutputPane(
+            lines, empty,
+            Modifier.heightIn(min = minHeight, max = 320.dp).verticalScroll(scroll),
+        )
+    }
+
+    if (full) {
+        Dialog(
+            onDismissRequest = { full = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            val fullScroll = rememberScrollState()
+            LaunchedEffect(lines.size) { fullScroll.animateScrollTo(fullScroll.maxValue) }
+            Column(
+                Modifier.fillMaxSize().background(Bg).statusBarsPadding().imePadding()
+                    .padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title, color = Amber, fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f),
+                    )
+                    if (lines.isNotEmpty()) {
+                        Pill("copy", Muted) {
+                            clipboard.setText(AnnotatedString(lines.joinToString("\n")))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Pill("close", Muted) { full = false }
+                }
+                Spacer(Modifier.height(10.dp))
+                SelectionContainer(Modifier.weight(1f)) {
+                    Column(
+                        Modifier.fillMaxSize().clip(CardShape).background(ConsoleBg)
+                            .border(1.dp, LineColor, CardShape)
+                            .padding(12.dp).verticalScroll(fullScroll),
+                    ) {
+                        if (lines.isEmpty()) {
+                            Text(
+                                empty, color = Dim, fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        lines.forEach {
+                            Text(
+                                it,
+                                color = if (it.startsWith("$") || it.startsWith(">")) Green else Muted,
+                                fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                                lineHeight = 17.sp,
+                            )
+                        }
+                    }
+                }
+                if (input != null) {
+                    Spacer(Modifier.height(10.dp))
+                    input()
+                }
+            }
         }
     }
 }

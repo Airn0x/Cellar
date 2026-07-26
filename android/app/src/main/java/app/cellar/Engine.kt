@@ -17,12 +17,14 @@ import java.io.File
  */
 class Engine(context: Context) {
 
+    private val app = context.applicationContext
     private val libs = File(context.applicationInfo.nativeLibraryDir)
     private val engineBin = File(libs, "libcellar.so")
     private val prootBin = File(libs, "libproot.so")
     private val loaderBin = File(libs, "libproot_loader.so")
     private val home = File(context.filesDir, "cellar")
     private val tmp = File(context.cacheDir, "cellar-tmp")
+    private val catalogDir = File(context.filesDir, "catalog")
 
     val isBundled: Boolean get() = engineBin.exists()
     val hasProot: Boolean get() = prootBin.exists() && loaderBin.exists()
@@ -53,6 +55,47 @@ class Engine(context: Context) {
         fun runsOn(distro: String) = distros.isEmpty() || distro in distros
     }
 
+    /**
+     * Unpacks the bundled catalog into app storage. The engine reads
+     * stacks from disk, and an APK's assets are not a filesystem path —
+     * without this the catalog is simply empty inside the app.
+     * Re-extracted whenever the app version changes.
+     */
+    private fun ensureCatalog(): File {
+        val stamp = File(catalogDir, ".version")
+        val want = try {
+            app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "0"
+        } catch (e: Exception) {
+            "0"
+        }
+        if (stamp.isFile && stamp.readText() == want) return catalogDir
+        catalogDir.deleteRecursively()
+        catalogDir.mkdirs()
+        copyAsset("catalog", catalogDir)
+        runCatching { stamp.writeText(want) }
+        return catalogDir
+    }
+
+    private fun copyAsset(assetPath: String, dest: File) {
+        val children = try {
+            app.assets.list(assetPath) ?: emptyArray()
+        } catch (e: Exception) {
+            emptyArray()
+        }
+        if (children.isEmpty()) { // a file
+            runCatching {
+                app.assets.open(assetPath).use { input ->
+                    dest.outputStream().use { input.copyTo(it) }
+                }
+            }
+            return
+        }
+        dest.mkdirs()
+        children.forEach { child ->
+            copyAsset("$assetPath/$child", File(dest, child))
+        }
+    }
+
     private fun processBuilder(args: List<String>): ProcessBuilder {
         home.mkdirs(); tmp.mkdirs()
         val pb = ProcessBuilder(listOf(engineBin.absolutePath) + args).redirectErrorStream(true)
@@ -60,6 +103,7 @@ class Engine(context: Context) {
             put("CELLAR_HOME", home.absolutePath)
             put("CELLAR_PROOT", prootBin.absolutePath)
             put("PROOT_LOADER", loaderBin.absolutePath)
+            put("CELLAR_CATALOG", ensureCatalog().absolutePath)
             put("TMPDIR", tmp.absolutePath)
         }
         return pb

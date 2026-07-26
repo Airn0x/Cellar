@@ -51,6 +51,15 @@ android {
     }
 }
 
+// The catalog is data the engine reads at runtime, so it has to travel
+// inside the APK: an app has no repo checkout to find it in. Copied into
+// assets at build time, extracted to app storage on first run.
+val syncCatalog = tasks.register<Copy>("syncCatalog") {
+    from(rootProject.file("../catalog"))
+    into(layout.projectDirectory.dir("src/main/assets/catalog"))
+}
+tasks.named("preBuild") { dependsOn(syncCatalog) }
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")
