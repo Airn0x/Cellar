@@ -39,20 +39,23 @@ jobs:
       - name: shellcheck stacks
         run: shellcheck catalog/*/apply.sh
 
-  # proot is slow to build (termux-packages Docker) and changes only when
-  # its pinned tag does, so it's cached on the recipe's hash + the recipes pin.
-  # The recipes are pinned too: their HEAD broke the static link on 2026-10-02
-  # (talloc's rep_memset_explicit). d1f9b41 = what the last good build used.
+  # proot is slow to build (termux-packages Docker) and changes only when its
+  # inputs do, so it's cached on the recipe's hash + both pins below.
+  # Pinned recipes + the builder image that matches them (NDK 30); bump both together.
+  # 87c13c6 = the last recipes before talloc 2.5.0, which breaks the static link
+  # (undefined rep_memset_explicit, 2026-10-02).
   proot:
     runs-on: ubuntu-latest
     env:
-      TERMUX_PACKAGES_REV: d1f9b41ea4dd856075f53bc60d94fd5eaa5be55d
+      TERMUX_PACKAGES_REV: 87c13c65ddce978992b114887dcf5a365fd84bf2
+      TERMUX_BUILDER_IMAGE_NAME: ghcr.io/termux/package-builder@sha256:44999857244619e25bc8e3427904a16d36cc0c0e087704af039e5bdf94814ac9
     outputs:
       key: ${{ steps.k.outputs.key }}
     steps:
       - uses: actions/checkout@v4
       - id: k
-        run: echo "key=proot-${{ hashFiles('proot/build.sh') }}-${TERMUX_PACKAGES_REV:0:12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "key=proot-${{ hashFiles('proot/build.sh') }}-${TERMUX_PACKAGES_REV:0:12}-${TERMUX_BUILDER_IMAGE_NAME: -12}" >> "$GITHUB_OUTPUT"
       - id: cache
         uses: actions/cache@v4
         with:
