@@ -40,15 +40,19 @@ jobs:
         run: shellcheck catalog/*/apply.sh
 
   # proot is slow to build (termux-packages Docker) and changes only when
-  # its pinned tag does, so it's cached on the recipe's hash.
+  # its pinned tag does, so it's cached on the recipe's hash + the recipes pin.
+  # The recipes are pinned too: their HEAD broke the static link on 2026-10-02
+  # (talloc's rep_memset_explicit). d1f9b41 = what the last good build used.
   proot:
     runs-on: ubuntu-latest
+    env:
+      TERMUX_PACKAGES_REV: d1f9b41ea4dd856075f53bc60d94fd5eaa5be55d
     outputs:
       key: ${{ steps.k.outputs.key }}
     steps:
       - uses: actions/checkout@v4
       - id: k
-        run: echo "key=proot-${{ hashFiles('proot/build.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=proot-${{ hashFiles('proot/build.sh') }}-${TERMUX_PACKAGES_REV:0:12}" >> "$GITHUB_OUTPUT"
       - id: cache
         uses: actions/cache@v4
         with:
@@ -57,7 +61,9 @@ jobs:
       - name: build static proot + unbundled loader
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/termux/termux-packages
+          git init -q termux-packages
+          git -C termux-packages fetch -q --depth 1 https://github.com/termux/termux-packages "$TERMUX_PACKAGES_REV"
+          git -C termux-packages checkout -q FETCH_HEAD
           mkdir -p termux-packages/packages/proot-apk
           cp proot/build.sh termux-packages/packages/proot-apk/build.sh
           cd termux-packages
